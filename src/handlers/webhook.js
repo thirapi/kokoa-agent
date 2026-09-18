@@ -24,9 +24,25 @@ export async function handleWebhook(request, env, ctx) {
     const rateLimitKey = `rate_limit:${chatId}`;
     const lastUpdateKey = `last_update:${chatId}`;
 
-    if (chatId !== String(env.ALLOWED_USER_ID)) {
-      console.warn(`Unauthorized access: ${chatId}. Expected: ${env.ALLOWED_USER_ID}`);
+    const allowedIds = (env.ALLOWED_USER_ID || "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean);
+
+    if (!allowedIds.includes(chatId)) {
+      console.warn(`Unauthorized access: ${chatId}. Expected one of: ${allowedIds.join(", ")}`);
       return new Response("OK", { status: 200 });
+    }
+
+    // Jika pesan dari Grup, hanya respon jika di-mention (@) atau di-reply
+    const isGroup = message.chat.type === "group" || message.chat.type === "supergroup";
+    if (isGroup) {
+      const text = message.text || message.caption || "";
+      const isReplyToBot = message.reply_to_message?.from?.is_bot;
+      const isMentioned = text.includes("@") || isReplyToBot;
+      if (!isMentioned) {
+        return new Response("OK", { status: 200 });
+      }
     }
 
     const lastUpdateId = await env.CHAT_HISTORY.get(lastUpdateKey);
