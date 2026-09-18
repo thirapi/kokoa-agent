@@ -21,6 +21,7 @@ export async function handleWebhook(request, env, ctx) {
     }
 
     const chatId = String(message.chat.id);
+    const senderId = message.from ? String(message.from.id) : "";
     const rateLimitKey = `rate_limit:${chatId}`;
     const lastUpdateKey = `last_update:${chatId}`;
 
@@ -29,17 +30,30 @@ export async function handleWebhook(request, env, ctx) {
       .map((id) => id.trim())
       .filter(Boolean);
 
-    if (!allowedIds.includes(chatId)) {
-      console.warn(`Unauthorized access: ${chatId}. Expected one of: ${allowedIds.join(", ")}`);
+    // Normalisasi ID: Hapus "-100" jika supergroup untuk kecocokan toleran
+    const normalizeId = (idStr) => idStr.replace(/^-100/, "-");
+    const normChatId = normalizeId(chatId);
+    const normSenderId = normalizeId(senderId);
+
+    const isAllowed = allowedIds.some((id) => {
+      const normAllowed = normalizeId(id);
+      return normAllowed === normChatId || normAllowed === normSenderId || id === chatId || id === senderId;
+    });
+
+    if (!isAllowed) {
+      console.warn(`Unauthorized access: chatId=${chatId}, senderId=${senderId}. Allowed: ${allowedIds.join(", ")}`);
       return new Response("OK", { status: 200 });
     }
 
-    // Jika pesan dari Grup, hanya respon jika di-mention (@) atau di-reply
+    // Jika pesan dari Grup / Supergroup, respon jika di-mention, di-reply, atau chat bertipe group
     const isGroup = message.chat.type === "group" || message.chat.type === "supergroup";
     if (isGroup) {
       const text = message.text || message.caption || "";
       const isReplyToBot = message.reply_to_message?.from?.is_bot;
-      const isMentioned = text.includes("@") || isReplyToBot;
+      const hasMentionEntity = (message.entities || message.caption_entities || []).some(
+        (e) => e.type === "mention" || e.type === "text_mention"
+      );
+      const isMentioned = text.toLowerCase().includes("@") || isReplyToBot || hasMentionEntity;
       if (!isMentioned) {
         return new Response("OK", { status: 200 });
       }
