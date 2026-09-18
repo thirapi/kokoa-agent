@@ -1,4 +1,5 @@
 import { githubTools, spacesTools, trelloTools } from "../tools/definitions.js";
+import { compactMessages } from "../agent/compaction.js";
 import { getRecentMemories } from "../db/index.js";
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
@@ -351,31 +352,7 @@ export async function fetchGroqGenerate(model, key, contents, env, chatId) {
   const userText = extractLatestUserText(contents);
   const tools = selectTools(userText, env.IS_SPACES);
 
-  let convMessages = [systemMessage, ...messages];
-  const MAX_INPUT_TOKENS = 9000;
-
-  let estimated = estimateTokens(JSON.stringify({ messages: convMessages, tools }));
-  // Trim messages to fit token budget, but ALWAYS remove in pairs to avoid orphan tool messages.
-  // Pair = [assistant with tool_calls] + [tool response(s)]. Never split a pair.
-  while (estimated > MAX_INPUT_TOKENS && convMessages.length > 4) {
-    // Find first non-system message to remove (index 1)
-    // If it's an assistant with tool_calls, also remove the following tool responses
-    let removeCount = 1;
-    const candidate = convMessages[1];
-    if (candidate?.role === 'assistant' && candidate.tool_calls?.length > 0) {
-      // Also remove all consecutive tool messages that follow
-      let j = 2;
-      while (j < convMessages.length && convMessages[j].role === 'tool') {
-        j++;
-        removeCount++;
-      }
-    } else if (candidate?.role === 'tool') {
-      // Orphan tool message — skip it too (shouldn't happen but guard anyway)
-      removeCount = 1;
-    }
-    convMessages.splice(1, removeCount);
-    estimated = estimateTokens(JSON.stringify({ messages: convMessages, tools }));
-  }
+  let convMessages = compactMessages([systemMessage, ...messages], MAX_INPUT_TOKENS);
 
   const payload = {
     model,

@@ -7,6 +7,8 @@ import {
   sendTelegramMessage,
 } from "../services/telegram.js";
 import { executeTool } from "../tools/executor.js";
+import { runHarnessToolCall, isWriteTool } from "../tools/harness.js";
+import { validateToolArgs } from "../agent/registry.js";
 import { markdownToRichHtml } from "../utils/formatter.js";
 import { shuffleArray } from "../utils/array.js";
 import { logError } from "../utils/logger.js";
@@ -317,38 +319,34 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
       const results = await Promise.all(functionCalls.map(call => {
         const { name, args } = call.functionCall;
         return (async () => {
-          const cacheKey = `${name}:${JSON.stringify(args)}`;
-          // Only cache read-only tools — write tools must always execute fresh
-          const isCacheable = !WRITE_TOOLS.has(name);
-          const cached = isCacheable ? toolCache.get(cacheKey) : null;
-          if (cached) return cached;
-
+          const validation = validateToolArgs(name, args || {});
+          if (!validation.valid) {
+            console.warn(`[Registry Validation Failed]: ${validation.error}`);
+            return { error: validation.error };
+          }
           console.log(`Executing Tool: ${name}`, args);
-          if (WRITE_TOOLS.has(name) || name === 'runCommand' || name === 'executeCommand') {
+          if (isWriteTool(name)) {
             filesModified = true;
           }
           await sendProgress(`Menjalankan ${name}...`);
-          try {
-            let result = await execTool(name, args, env, chatId);
-            result = truncateToolResult(result);
-            if (isCacheable) toolCache.set(cacheKey, result);
-            await sendProgress(`Selesai menjalankan ${name}.`);
-            return result;
-          } catch (toolErr) {
-            console.error(`Tool "${name}" gagal:`, toolErr);
-            await sendProgress(`Gagal menjalankan ${name}: ${toolErr.message}`);
+          const res = await runHarnessToolCall(name, args, env, chatId, toolCache, { toolExecutor: execTool });
+          if (!res.ok) {
+            console.error(`Tool "${name}" gagal:`, res.error);
+            await sendProgress(`Gagal menjalankan ${name}: ${res.error}`);
             if (
-              (toolErr.message.includes("403") ||
-               toolErr.message.includes("401") ||
-               toolErr.message.includes("Resource not accessible")) &&
-              toolErr.message.includes("GitHub")
+              (res.error.includes("403") ||
+               res.error.includes("401") ||
+               res.error.includes("Resource not accessible")) &&
+              res.error.includes("GitHub")
             ) {
               throw new Error(
                 "gagal akses karena masalah izin. coba cek token github kamu ya!",
               );
             }
-            return { error: toolErr.message };
+            return { error: res.error };
           }
+          await sendProgress(`Selesai menjalankan ${name}.`);
+          return res.result;
         })();
       }));
 
