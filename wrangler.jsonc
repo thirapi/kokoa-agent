@@ -1,5 +1,6 @@
 {
 	"name": "tg-bot",
+	"account_id": "73409557ccf9eb56ce8bcff165f5e044",
 	"main": "src/index.js",
 	"compatibility_date": "2026-06-01",
 	"build": {
