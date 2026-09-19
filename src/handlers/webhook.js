@@ -89,6 +89,82 @@ export async function handleWebhook(request, env, ctx) {
     let text = message.text || message.caption || "";
     let normalizedText = text.trim().toLowerCase();
 
+    // Tombol approval ✅/❌ untuk tool berisiko (suspend → resume loop)
+    if (normalizedText.startsWith("approve:") || normalizedText.startsWith("deny:")) {
+      const sepIdx = normalizedText.indexOf(":");
+      const decision = normalizedText.slice(0, sepIdx);
+      const approvalId = normalizedText.slice(sepIdx + 1).trim();
+      ctx.waitUntil((async () => {
+        const { loadApproval, deleteApproval } = await import("../agent/approval.js");
+        const approval = await loadApproval(env, approvalId);
+        if (!approval || approval.status !== "pending" || !approval.snapshot) {
+          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "approval-nya udah kedaluwarsa wkwk. kirim ulang aja perintahnya");
+          return;
+        }
+        const acquired = await acquireChatLock(env, chatId);
+        if (!acquired) {
+          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "bentar, masih ada yg jalan. klik lagi tombolnya abis ini ya");
+          return;
+        }
+        await deleteApproval(env, approvalId);
+        const snap = approval.snapshot;
+        const resume = {
+          contents: snap.contents,
+          historyLen: snap.historyLen || 0,
+          pendingTool: snap.pending || null,
+          grantedKey: decision === "approve" ? snap.pending?.key : null,
+          deniedKey: decision === "deny" ? snap.pending?.key : null,
+        };
+        try {
+          if (snap.runtime === "spaces" && env.HF_SPACES_URL) {
+            const r = await fetch(`${env.HF_SPACES_URL}/api/resume`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ approvalId, decision, snapshot: snap }),
+              signal: AbortSignal.timeout(15000),
+            });
+            if (!r.ok) throw new Error(`Spaces resume HTTP ${r.status}`);
+            await releaseChatLock(env, chatId);
+            return; // Spaces lanjutin loop + kirim hasil via proxy
+          }
+          const { runAgentLoop, buildProviderConfigs } = await import("./message.js");
+          const providerConfigs = await buildProviderConfigs(env);
+          const result = await runAgentLoop(
+            snap.contents, env, String(snap.chatId || chatId), snap.userPrompt || "",
+            providerConfigs, [], Date.now(),
+            { runtime: "worker", resume }
+          );
+          const { addHistory, trimHistory } = await import("../db/index.js");
+          const { markdownToRichHtml } = await import("../utils/formatter.js");
+          const { followUpKeyboard } = await import("../services/telegram.js");
+          const fullContents = result.contents || snap.contents;
+          const newContent = fullContents.slice(snap.historyLen || 0);
+          if (newContent.length > 0) {
+            const cleaned = newContent.map(c => ({
+              role: c.role,
+              parts: (c.parts || []).map(p => p.inline_data ? { text: `[Media: ${p.inline_data.mime_type}]` } : p),
+            }));
+            await addHistory(env, String(snap.chatId || chatId), cleaned);
+            await trimHistory(env, String(snap.chatId || chatId), 10);
+          }
+          if (result.escalationTriggered) {
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "tugas ini butuh akses sistem yang lebih dalam. aku kerjakan di GitHub Actions ya...");
+          } else if (result.finalText) {
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, markdownToRichHtml(result.finalText), followUpKeyboard());
+          } else {
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "tugasnya udah aku jalanin ya! tp aku ga dapet respons teks penutup dr sistem.");
+          }
+        } catch (e) {
+          console.error("[Approval] Resume failed:", e);
+          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "yah gagal lanjutin tugasnya... coba kirim ulang ya!");
+        } finally {
+          await releaseChatLock(env, chatId);
+        }
+      })());
+      await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
+      return new Response("OK", { status: 200 });
+    }
+
     // Command /skill <nama> [prompt]: paksa skill tertentu untuk pesan ini (+10 menit ke depan)
     if (normalizedText.startsWith("/skill")) {
       const { getSkill, setForcedSkill, SKILLS } = await import("../agent/skills.js");

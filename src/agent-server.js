@@ -4,6 +4,7 @@ import { execSync } from 'child_process';
 import { runAgentLoop, buildProviderConfigs } from './handlers/message.js';
 import { executeTool } from './tools/executor.js';
 import { executeSpacesTool, isSpacesTool } from './tools/spaces-executor.js';
+import { ApprovalPending, approvalButtons, approvalPromptText } from './agent/approval.js';
 
 async function hybridExecutor(name, args, env, chatId) {
   if (isSpacesTool(name)) {
@@ -32,6 +33,83 @@ setInterval(() => {
   }
 }, 60000);
 let lastWorkerUrl = null;
+
+async function postWorkerJSON(path, obj, timeoutMs = 10000) {
+  if (!lastWorkerUrl) throw new Error('WORKER_URL belum tersedia');
+  const bodyStr = JSON.stringify(obj);
+  return new Promise((resolve, reject) => {
+    const u = new URL(path, lastWorkerUrl);
+    const req = https.request({
+      hostname: u.hostname,
+      path: u.pathname + u.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer kokoa-runner-secret',
+        'Content-Length': Buffer.byteLength(bodyStr),
+      },
+      timeout: timeoutMs,
+    }, (res) => {
+      let d = '';
+      res.on('data', c => d += c);
+      res.on('end', () => (res.statusCode >= 200 && res.statusCode < 300) ? resolve(d) : reject(new Error(`Worker ${res.statusCode}`)));
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.write(bodyStr);
+    req.end();
+  });
+}
+
+async function proxyFinalWithFollowUp(proxyTelegram, stringChatId, finalText) {
+  const { markdownToRichHtml } = await import("./utils/formatter.js");
+  const richHtml = markdownToRichHtml(finalText);
+  const r = await proxyTelegram("sendMessage", {
+    chat_id: Number(stringChatId), text: richHtml, parse_mode: "HTML",
+    reply_markup: {
+      inline_keyboard: [[
+        { text: "🔍 detailin", callback_data: "detailin" },
+        { text: "➡️ lanjutin", callback_data: "lanjutkan" },
+      ]],
+    },
+  });
+  return r?.ok === true;
+}
+
+async function finishSpacesResult(stringChatId, { finalText, newContent, escalationTriggered, progressMsgId }, proxyTelegram) {
+  const entry = {
+    status: 'complete',
+    finalText,
+    newContent,
+    escalationTriggered: !!escalationTriggered,
+    error: null,
+    proxySent: false,
+    historySynced: false,
+    progressMsgId: progressMsgId || null,
+    ts: Date.now(),
+  };
+  resultsStore.set(stringChatId, entry);
+  if (!lastWorkerUrl) return entry;
+  if (finalText) {
+    try {
+      if (await proxyFinalWithFollowUp(proxyTelegram, stringChatId, finalText)) entry.proxySent = true;
+    } catch (e) {
+      console.error('[Spaces] proxy final failed:', e.message);
+    }
+  }
+  if (newContent && newContent.length > 0) {
+    try {
+      await postWorkerJSON('/api/spaces-callback', {
+        chatId: stringChatId, newContents: newContent, token: 'kokoa-runner-secret', isFinal: true,
+      });
+      entry.historySynced = true;
+      console.log(`[Spaces] Synced new history to D1 for chat ${stringChatId}`);
+    } catch (e) {
+      console.error('[Spaces] Failed sync to D1:', e.message);
+    }
+  }
+  return entry;
+}
 
 function parseBody(req) {
   return new Promise((resolve, reject) => {
@@ -238,7 +316,21 @@ const server = createServer(async (req, res) => {
           const result = await runAgentLoop(
             currentContents, proxyEnv, stringChatId, userPrompt || '',
             providerConfigs, [], startTime,
-            { executionTimeout: 240000, iterationTimeout: 30000, toolExecutor: hybridExecutor }
+            {
+              executionTimeout: 240000, iterationTimeout: 30000, toolExecutor: hybridExecutor,
+              runtime: 'spaces',
+              saveSnapshot: async (id, snap) => {
+                await postWorkerJSON('/api/approval-store', { id, snapshot: snap });
+              },
+              notifyApproval: async ({ id, tool, toolArgs }) => {
+                await proxyTelegram('sendMessage', {
+                  chat_id: Number(stringChatId),
+                  text: approvalPromptText(tool, toolArgs),
+                  parse_mode: 'HTML',
+                  reply_markup: approvalButtons(id),
+                });
+              },
+            }
           );
 
           // Persist workspace update if cloneRepo was called during this loop
@@ -257,77 +349,19 @@ const server = createServer(async (req, res) => {
             finalText = result.finalText || "tugasnya udah aku jalanin ya! tp aku ga dapet respons teks penutup dr sistem. coba cek repo kamu deh, harusnya kodenya udh ke-update";
           }
 
-          const resultEntry = {
-            status: 'complete',
-            finalText,
-            newContent,
+          await finishSpacesResult(stringChatId, {
+            finalText, newContent,
             escalationTriggered: result.escalationTriggered,
-            error: null,
-            proxySent: false,
-            progressMsgId: progressMsgId || null,
-            ts: Date.now()
-          };
-          resultsStore.set(stringChatId, resultEntry);
+            progressMsgId,
+          }, proxyTelegram);
           console.log(`[Spaces] Result stored for chat ${stringChatId}`);
 
-          if (lastWorkerUrl) {
-            // Send response via proxy
-            const proxyOk = finalText ? await (async () => {
-              const { markdownToRichHtml } = await import("./utils/formatter.js");
-              const richHtml = markdownToRichHtml(finalText);
-              const r = await proxyTelegram("sendMessage", {
-                chat_id: Number(stringChatId), text: richHtml, parse_mode: "HTML",
-                reply_markup: {
-                  inline_keyboard: [[
-                    { text: "🔍 detailin", callback_data: "detailin" },
-                    { text: "➡️ lanjutin", callback_data: "lanjutkan" },
-                  ]],
-                },
-              });
-              return r?.ok === true;
-            })() : false;
-
-            // Sync new contents to Worker D1 Database via callback
-            if (newContent && newContent.length > 0) {
-              try {
-                const cbUrl = `${lastWorkerUrl}/api/spaces-callback`;
-                const cbBody = JSON.stringify({
-                  chatId: stringChatId,
-                  newContents: newContent,
-                  token: 'kokoa-runner-secret',
-                  isFinal: true
-                });
-                await new Promise((resolve) => {
-                  const u = new URL(cbUrl);
-                  const req = https.request({
-                    hostname: u.hostname,
-                    path: u.pathname,
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'Authorization': 'Bearer kokoa-runner-secret',
-                      'Content-Length': Buffer.byteLength(cbBody)
-                    },
-                    timeout: 10000
-                  }, (res) => { res.resume(); resolve(); });
-                  req.on('error', resolve);
-                  req.on('timeout', () => { req.destroy(); resolve(); });
-                  req.write(cbBody);
-                  req.end();
-                });
-                console.log(`[Spaces] Synced new history to D1 for chat ${stringChatId}`);
-              } catch (e) {
-                console.error(`[Spaces] Failed sync to D1:`, e.message);
-              }
-            }
-
-            if (proxyOk) {
-              const existing = resultsStore.get(stringChatId);
-              if (existing) { existing.proxySent = true; }
-            }
-          }
-
         } catch (err) {
+          if (err instanceof ApprovalPending || err?.message === '__APPROVAL_PENDING__') {
+            resultsStore.set(stringChatId, { status: 'awaiting_approval', approvalId: err.approvalId, ts: Date.now() });
+            console.log(`[Spaces] Loop paused awaiting approval ${err.approvalId} for chat ${stringChatId}`);
+            return;
+          }
           console.error('[Spaces] Async agent loop error:', err);
           const errorMsg = err.message;
           const errorResult = {
@@ -363,6 +397,146 @@ const server = createServer(async (req, res) => {
       return;
     } catch (err) {
       console.error('Agent server error:', err);
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (url.pathname === '/api/resume' && req.method === 'POST') {
+    try {
+      const body = await parseBody(req);
+      const { approvalId, decision, snapshot } = body;
+      if (!approvalId || !snapshot) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Missing approvalId/snapshot' }));
+        return;
+      }
+      const stringChatId = String(snapshot.chatId || '');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'resumed' }));
+      resultsStore.set(stringChatId, { status: 'processing', ts: Date.now() });
+
+      (async () => {
+        async function proxyTelegram2(method, body) {
+          const url = new URL(`${lastWorkerUrl}/api/telegram-proxy/${method}`);
+          const bodyStr = JSON.stringify(body);
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+              const result = await new Promise((resolve, reject) => {
+                const req = https.request({
+                  hostname: url.hostname,
+                  path: url.pathname + url.search + `?_=${Date.now()}`,
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer kokoa-runner-secret',
+                    'Content-Length': Buffer.byteLength(bodyStr),
+                  },
+                  timeout: 15000,
+                }, (res) => {
+                  let data = '';
+                  res.on('data', c => data += c);
+                  res.on('end', () => {
+                    try { resolve(JSON.parse(data)); } catch { resolve({ ok: false }); }
+                  });
+                });
+                req.on('error', () => reject());
+                req.on('timeout', () => { req.destroy(); reject(); });
+                req.write(bodyStr);
+                req.end();
+              });
+              if (result?.ok) return result;
+            } catch {}
+            if (attempt < 2) await new Promise(r => setTimeout(r, 3000));
+          }
+          return null;
+        }
+
+        try {
+          const proxyEnv = buildProxyEnv(process.env);
+          if (lastWorkerUrl) proxyEnv.WORKER_URL = lastWorkerUrl;
+          if (snapshot.mode === 'plan' || snapshot.mode === 'build') proxyEnv.AGENT_MODE = snapshot.mode;
+
+          const workspaceKey = `workspace:${stringChatId}`;
+          const savedState = workspaceStore.get(workspaceKey);
+          if (savedState) {
+            const savedPath = typeof savedState === 'string' ? savedState : savedState.path;
+            const savedRepo = typeof savedState === 'string' ? null : savedState.repo;
+            const { existsSync } = await import('fs');
+            if (existsSync(savedPath)) {
+              proxyEnv.__WORKSPACE = savedPath;
+              if (savedRepo) proxyEnv.CURRENT_REPO = savedRepo;
+            } else {
+              workspaceStore.delete(workspaceKey);
+            }
+          }
+
+          const providerConfigs = await buildProviderConfigs(proxyEnv);
+          if (providerConfigs.length === 0) throw new Error('No AI providers configured');
+
+          const resume = {
+            contents: snapshot.contents,
+            historyLen: snapshot.historyLen || 0,
+            pendingTool: snapshot.pending || null,
+            grantedKey: decision === 'approve' ? snapshot.pending?.key : null,
+            deniedKey: decision === 'deny' ? snapshot.pending?.key : null,
+          };
+          const result = await runAgentLoop(
+            snapshot.contents, proxyEnv, stringChatId, snapshot.userPrompt || '',
+            providerConfigs, [], Date.now(),
+            {
+              executionTimeout: 240000, iterationTimeout: 30000, toolExecutor: hybridExecutor,
+              runtime: 'spaces', resume,
+              saveSnapshot: async (id, snap) => {
+                await postWorkerJSON('/api/approval-store', { id, snapshot: snap });
+              },
+              notifyApproval: async ({ id, tool, toolArgs }) => {
+                await proxyTelegram2('sendMessage', {
+                  chat_id: Number(stringChatId),
+                  text: approvalPromptText(tool, toolArgs),
+                  parse_mode: 'HTML',
+                  reply_markup: approvalButtons(id),
+                });
+              },
+            }
+          );
+
+          const newPath = proxyEnv.__WORKSPACE;
+          const newRepo = proxyEnv.CURRENT_REPO;
+          if (newPath && (!savedState || newPath !== (typeof savedState === 'string' ? savedState : savedState.path))) {
+            workspaceStore.set(workspaceKey, { path: newPath, repo: newRepo || null });
+          }
+
+          const fullContents = result.contents || snapshot.contents;
+          const newContent = fullContents.slice(snapshot.historyLen || 0).filter(c => !c._selfReflection);
+          let finalText = null;
+          if (!result.escalationTriggered) {
+            finalText = result.finalText || "tugasnya udah aku jalanin ya! tp aku ga dapet respons teks penutup dr sistem. coba cek repo kamu deh, harusnya kodenya udh ke-update";
+          }
+          await finishSpacesResult(stringChatId, {
+            finalText, newContent,
+            escalationTriggered: result.escalationTriggered,
+            progressMsgId: null,
+          }, proxyTelegram2);
+          console.log(`[Spaces] Resume completed for chat ${stringChatId}`);
+        } catch (err) {
+          if (err instanceof ApprovalPending || err?.message === '__APPROVAL_PENDING__') {
+            resultsStore.set(stringChatId, { status: 'awaiting_approval', approvalId: err.approvalId, ts: Date.now() });
+            console.log(`[Spaces] Resume paused again awaiting approval ${err.approvalId}`);
+            return;
+          }
+          console.error('[Spaces] Resume error:', err);
+          resultsStore.set(stringChatId, {
+            status: 'complete', finalText: null, newContent: [],
+            escalationTriggered: false, error: err.message,
+            proxySent: false, historySynced: false, progressMsgId: null, ts: Date.now(),
+          });
+        }
+      })();
+      return;
+    } catch (err) {
+      console.error('Resume endpoint error:', err);
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: err.message }));
     }

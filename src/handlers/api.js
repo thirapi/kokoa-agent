@@ -308,6 +308,27 @@ export async function handleAPI(request, env, ctx) {
     return new Response("Method Not Allowed", { status: 405 });
   }
 
+  // Spaces menitipkan snapshot approval ke KV Worker (agar survive restart + bisa di-resume)
+  if (path === "/api/approval-store" && request.method === "POST") {
+    const auth = request.headers.get("Authorization");
+    if (auth !== `Bearer ${CALLBACK_TOKEN}`) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+    try {
+      const body = await request.json();
+      const { id, snapshot } = body;
+      if (!id || !snapshot) {
+        return new Response("Missing id/snapshot", { status: 400 });
+      }
+      await env.CHAT_HISTORY.put(`approval:${id}`, JSON.stringify({ status: "pending", snapshot }), { expirationTtl: 600 });
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (e) {
+      return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 500 });
+    }
+  }
+
   if (path.startsWith("/api/telegram-proxy/")) {
     if (request.method !== "POST") {
       return new Response("Method Not Allowed", { status: 405 });

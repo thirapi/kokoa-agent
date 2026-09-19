@@ -12,6 +12,10 @@ import { executeTool } from "../tools/executor.js";
 import { runHarnessToolCall, isWriteTool } from "../tools/harness.js";
 import { validateToolArgs, isReadOnlyTool } from "../agent/registry.js";
 import { resolveAgentMode } from "../agent/mode.js";
+import {
+  isHighRiskTool, toolCallKey, ApprovalPending,
+  saveApproval, stripMediaForSnapshot, approvalButtons, approvalPromptText,
+} from "../agent/approval.js";
 import { getValidModelsForProvider } from "../agent/models-discovery.js";
 import { markdownToRichHtml } from "../utils/formatter.js";
 import { shuffleArray } from "../utils/array.js";
@@ -100,6 +104,31 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
   let filesModified = false;
   const isSpaces = !!env.IS_SPACES;
   const agentMode = await resolveAgentMode(env, chatId).catch(() => 'build');
+  const resume = options.resume || null;
+  if (resume?.contents) {
+    currentContents = resume.contents;
+  }
+  if (resume && !startTime) startTime = Date.now();
+  // Resume: eksekusi/tolak pending tool call DULU sebelum loop lanjut,
+  // karena model tidak akan mengulang functionCall yang sudah ada di contents.
+  if (resume?.pendingTool && !resume.settledPending) {
+    resume.settledPending = true;
+    const { tool: pTool, args: pArgs, key: pKey } = resume.pendingTool;
+    let pResult;
+    if (resume.grantedKey && resume.grantedKey === pKey) {
+      console.log(`[Approval] Executing granted tool ${pTool} on resume`);
+      const res = await runHarnessToolCall(pTool, pArgs || {}, env, chatId, toolCache, { toolExecutor: execTool });
+      pResult = res.ok ? res.result : { error: res.error };
+      if (isWriteTool(pTool)) filesModified = true;
+    } else {
+      console.log(`[Approval] Denied tool ${pTool} on resume`);
+      pResult = { error: "user membatalkan tool ini. jelaskan secara singkat, tawarkan alternatif, dan jangan panggil lagi tool yang sama." };
+    }
+    currentContents.push({
+      role: "function",
+      parts: [{ functionResponse: { name: pTool, response: { content: pResult } } }],
+    });
+  }
 
   // Throttle progress updates to avoid Telegram editMessageText rate limits
   let lastProgressTime = 0;
@@ -359,6 +388,49 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
             console.warn(`[Plan Mode Blocked]: ${name}`);
             return { error: `mode plan aktif, tool "${name}" diblokir karena read-only. ketik /build buat eksekusi.` };
           }
+          // Approval gate: tool berisiko tinggi wajib dikonfirmasi user dulu (mode build)
+          const tKey = toolCallKey(name, args || {});
+          if (resume?.grantedKey && resume.grantedKey === tKey && !resume.consumedGrant) {
+            resume.consumedGrant = true;
+            console.log(`[Approval] Grant consumed for ${name} in chat ${chatId}`);
+          } else if (resume?.deniedKey && resume.deniedKey === tKey) {
+            console.log(`[Approval] Denied tool ${name} in chat ${chatId}`);
+            return { error: "user membatalkan tool ini. jelaskan secara singkat, tawarkan alternatif, dan jangan panggil lagi tool yang sama." };
+          } else if (agentMode === 'build' && isHighRiskTool(name)) {
+            const requiresApproval = options.requiresApproval
+              ? await options.requiresApproval(name, args).catch(() => true)
+              : true;
+            if (requiresApproval) {
+              const getGrant = options.getGrant || (async () => false);
+              if (!(await getGrant(tKey).catch(() => false))) {
+                const approvalId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+                  ? crypto.randomUUID()
+                  : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+                const snapshot = {
+                  runtime: options.runtime || (env.IS_SPACES ? 'spaces' : 'worker'),
+                  chatId: String(chatId),
+                  mode: agentMode,
+                  contents: stripMediaForSnapshot(currentContents),
+                  userPrompt,
+                  historyLen: resume?.historyLen ?? history?.length ?? 0,
+                  elapsedMs: Date.now() - (startTime || Date.now()),
+                  pending: { tool: name, args: args || {}, key: tKey },
+                };
+                const saveSnapshot = options.saveSnapshot || (async (id, snap) => {
+                  await saveApproval(env, id, { status: 'pending', snapshot: snap });
+                });
+                await saveSnapshot(approvalId, snapshot);
+                const notify = options.notifyApproval || (async ({ id, tool, toolArgs }) => {
+                  await sendTelegramMessage(
+                    env.TELEGRAM_BOT_TOKEN, chatId,
+                    approvalPromptText(tool, toolArgs), approvalButtons(id)
+                  );
+                });
+                await notify({ id: approvalId, tool: name, toolArgs: args || {} });
+                throw new ApprovalPending(approvalId);
+              }
+            }
+          }
           console.log(`Executing Tool: ${name}`, args);
           if (isWriteTool(name)) {
             filesModified = true;
@@ -445,7 +517,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
     if (functionCalls.length === 0) break;
   }
 
-  return { finalText, escalationTriggered };
+  return { finalText, escalationTriggered, contents: currentContents };
 }
 
 const HEAVY_FILE_TOOLS = new Set([
@@ -690,6 +762,11 @@ export async function processMessage(message, env) {
       );
     }
     } catch (err) {
+    // Loop di-pause menunggu approval user — tombol sudah terkirim, lock dilepas via finally
+    if (err instanceof ApprovalPending || err?.message === "__APPROVAL_PENDING__") {
+      console.log(`[Approval] Loop paused for chat ${chatId}, approval ${err.approvalId}`);
+      return;
+    }
     console.error("processMessage Error:", err);
     await logError(env, chatId, "processMessage", err);
     const userMsg = err.message.startsWith("duh,") || err.message.startsWith("server") || err.message.startsWith("gagal")

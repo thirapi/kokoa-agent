@@ -8,7 +8,8 @@ export async function handleSpacesResult(env, chatId, data, progressMsgId) {
   console.log(`[SpacesResult] chatId=${chatId} newContent=${data.newContent?.length} finalText=${data.finalText?.slice(0,30)} proxySent=${data.proxySent}`);
 
   try {
-    if (data.newContent && data.newContent.length > 0) {
+    // historySynced = Spaces sudah sync riwayat via callback; jangan simpan dua kali
+    if (data.newContent && data.newContent.length > 0 && !data.historySynced) {
       const cleaned = data.newContent.map(c => ({
         role: c.role,
         parts: c.parts.map(p => {
