@@ -49,14 +49,12 @@ export function detectScope(latestText) {
 
 export function buildScopeBanner(scope, hasRepoContext) {
   if (scope === 'general') {
-    // SENGAJA tanpa kata kode/repo/nama-tool: model terbukti meniru kata larangan
-    // lalu membenarkan diri ("kita ga ngubah kode...") walau history sudah kosong.
-    // Instruksi positif saja; pemblokiran tool sudah ditangani harness + filter tools.
-    return "mode umum: kerjakan HANYA permintaan terakhir user, dan kirim HANYA apa yang diminta " +
-      "(misal minta audio saja -> jangan kirim photo/cover; minta info saja -> jangan kirim file). " +
-      "jangan mengungkit topik lama dari riwayat, jangan menawarkan mengerjakan hal lain yang tidak diminta, " +
-      "dan jangan menjelaskan apa yang TIDAK kamu lakukan — langsung kerjakan saja. " +
-      "cukup pakai webSearch/webFetch bila butuh info dari internet, atau jawab langsung dari pengetahuanmu.";
+    // MINIMAL dan positif saja. Pelajaran: daftar larangan ("jangan...", "tugas lama",
+    // "yang tidak kamu lakukan") justru dipikirkan model lalu dideklarasikan
+    // ("kita ga ngoding...") — makin dilarang makin disebut. Penegakan lewat
+    // harness (hard-block) + filter tools, bukan lewat teks instruksi.
+    return "mode umum: kerjakan permintaan terakhir user, dan sertakan hanya yang diminta. " +
+      "butuh info dari internet? pakai webSearch/webFetch. selebihnya jawab langsung.";
   }
   return null;
 }
