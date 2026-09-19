@@ -49,18 +49,13 @@ export function detectScope(latestText) {
 
 export function buildScopeBanner(scope, hasRepoContext) {
   if (scope === 'general') {
-    return "mode umum: pesan terakhir user adalah permintaan umum, bukan tugas kode/repo. " +
-      "kerjakan HANYA permintaan terakhir itu — jangan melanjutkan/mengulang tugas lama dari riwayat chat " +
-      "kecuali user memintanya. kirim HANYA apa yang diminta user " +
+    // SENGAJA tanpa kata kode/repo/nama-tool: model terbukti meniru kata larangan
+    // lalu membenarkan diri ("kita ga ngubah kode...") walau history sudah kosong.
+    // Instruksi positif saja; pemblokiran tool sudah ditangani harness + filter tools.
+    return "mode umum: kerjakan HANYA permintaan terakhir user, dan kirim HANYA apa yang diminta " +
       "(misal minta audio saja -> jangan kirim photo/cover; minta info saja -> jangan kirim file). " +
-      "di jawaban akhir, JANGAN sebut-sebut repo, file, atau tugas lama dari riwayat " +
-      "(misal jangan menawarkan melanjutkan proyek kemarin) kecuali user membahasnya di pesan terakhir. " +
-      (hasRepoContext
-        ? "abaikan repo aktif dan workspace lokal sepenuhnya. "
-        : "") +
-      "jawab langsung tanpa memanggil tool repo/file lokal " +
-      "(cloneRepo, readLocalFile, listLocalDir, grepLocalFiles, runCommand, getFileContent, searchInFiles, " +
-      "listDirectoryContents, createOrUpdateFile, createPullRequest, triggerDeveloperWorkflow). " +
+      "jangan mengungkit topik lama dari riwayat, jangan menawarkan mengerjakan hal lain yang tidak diminta, " +
+      "dan jangan menjelaskan apa yang TIDAK kamu lakukan — langsung kerjakan saja. " +
       "cukup pakai webSearch/webFetch bila butuh info dari internet, atau jawab langsung dari pengetahuanmu.";
   }
   return null;

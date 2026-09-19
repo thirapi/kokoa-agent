@@ -142,8 +142,11 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
 
   const webToolHint =
     "oh iya, kamu bisa cari info di internet pake `webSearch` kalo ada yang gatau, " +
-    "atau `webFetch` kalo mau baca halaman web. kalo pengguna nanya status workflow github, " +
-    "pake `checkWorkflowStatus`. kalo diminta cari gambar, pake `imageSearch` lalu kirim via `sendPhoto`. " +
+    "atau `webFetch` kalo mau baca halaman web. " +
+    (scope === 'general'
+      ? ""
+      : "kalo pengguna nanya status workflow github, pake `checkWorkflowStatus`. ") +
+    "kalo diminta cari gambar, pake `imageSearch` lalu kirim via `sendPhoto`. " +
     "kalo diminta cari lagu, pake `songSearch` lalu kirim cuplikannya via `sendAudio` (previewUrl). kirim HANYA yang diminta user (minta audio saja -> jangan kirim photo/cover). " +
     "kalo user mau denger full: lagu mainstream -> `youtubeSearch` lalu bagikan watchUrl-nya, ATAU `pipedAudioSearch` lalu kirim audioUrl-nya via `sendAudio` (kalau hasil ada mp3Url, kirim mp3Url itu). " +
     "musik gratis/cc -> `freeMusicSearch` lalu kirim downloadUrl-nya via `sendAudio` full + sebut artisnya. " +
@@ -197,9 +200,8 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
   const isGeneralScope = scope === 'general';
   const generalLimitsContext =
     "[batasan lingkungan:]\n" +
-    "- kerjakan langsung permintaan umum user (cari info/gambar/lagu, jawab pertanyaan)\n" +
-    "- kamu bisa akses web search dan memory\n" +
-    "- jangan tawarkan atau kerjakan tugas kode/repo";
+    "- kerjakan langsung permintaan user (cari info/gambar/lagu, jawab pertanyaan)\n" +
+    "- kamu bisa akses web search dan memory";
   const modeBanner = env.AGENT_MODE === 'plan' ? planModeBanner() : null;
   const workspaceContext = env.__WORKSPACE
     ? `[Workspace aktif: repo (${currentRepoName || 'unknown'}) sudah ter-clone di ${env.__WORKSPACE}. Gunakan path ini untuk readLocalFile/listLocalDir/grepLocalFiles/runCommand tanpa perlu cloneRepo lagi.]`
