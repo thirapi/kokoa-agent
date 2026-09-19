@@ -157,7 +157,23 @@ export async function deleteMemoriesByPrefix(env, chatId, prefix) {
   }
 }
 
+// Penyimpanan task in-session (Spaces tidak punya D1). Diisi via env.__TASKS_MEM
+// oleh agent-server: { [chatId]: { seq, items: [{id,title,description,priority,status}] } }.
+// Hilang saat container restart — cukup untuk task plan per percakapan.
+function memTaskBucket(env, chatId) {
+  if (!env.__TASKS_MEM) return null;
+  const key = String(chatId);
+  if (!env.__TASKS_MEM[key]) env.__TASKS_MEM[key] = { seq: 1, items: [] };
+  return env.__TASKS_MEM[key];
+}
+
 export async function addTask(env, chatId, title, description, priority = "medium") {
+  const mem = memTaskBucket(env, chatId);
+  if (mem) {
+    const id = mem.seq++;
+    mem.items.push({ id, title, description: description || null, priority: priority || "medium", status: "pending" });
+    return id;
+  }
   try {
     const { results } = await env.DB.prepare(
       `INSERT INTO tasks (chat_id, title, description, priority)
@@ -172,6 +188,10 @@ export async function addTask(env, chatId, title, description, priority = "mediu
 
 export async function getTasks(env, chatId, status) {
   if (env.__INJECTED_TASKS) return env.__INJECTED_TASKS;
+  const mem = memTaskBucket(env, chatId);
+  if (mem) {
+    return status ? mem.items.filter(t => t.status === status) : [...mem.items];
+  }
   if (!env.DB) return [];
   try {
     let query = `SELECT * FROM tasks WHERE chat_id = ?`;
@@ -190,6 +210,12 @@ export async function getTasks(env, chatId, status) {
 }
 
 export async function updateTaskStatus(env, chatId, taskId, status) {
+  const mem = memTaskBucket(env, chatId);
+  if (mem) {
+    const t = mem.items.find(t => String(t.id) === String(taskId));
+    if (t) t.status = status;
+    return;
+  }
   try {
     await env.DB.prepare(
       `UPDATE tasks SET status = ?, updated_at = unixepoch() WHERE id = ? AND chat_id = ?`
@@ -200,6 +226,14 @@ export async function updateTaskStatus(env, chatId, taskId, status) {
 }
 
 export async function createTasks(env, chatId, tasks) {
+  const mem = memTaskBucket(env, chatId);
+  if (mem) {
+    return (tasks || []).map(t => {
+      const id = mem.seq++;
+      mem.items.push({ id, title: t.title, description: t.description || null, priority: t.priority || "medium", status: "pending" });
+      return id;
+    });
+  }
   try {
     const stmt = env.DB.prepare(
       `INSERT INTO tasks (chat_id, title, description, priority) VALUES (?, ?, ?, ?) RETURNING id`
@@ -278,6 +312,11 @@ export async function deleteReminder(env, chatId, id) {
 }
 
 export async function clearTasks(env, chatId) {
+  const mem = memTaskBucket(env, chatId);
+  if (mem) {
+    mem.items = [];
+    return;
+  }
   try {
     await env.DB.prepare(
       `DELETE FROM tasks WHERE chat_id = ?`

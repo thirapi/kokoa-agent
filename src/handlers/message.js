@@ -11,6 +11,7 @@ import {
 import { executeTool } from "../tools/executor.js";
 import { runHarnessToolCall, isWriteTool } from "../tools/harness.js";
 import { validateToolArgs, isReadOnlyTool } from "../agent/registry.js";
+import { detectScope, extractLatestUserText, isRepoTool } from "../agent/scope.js";
 import { resolveAgentMode } from "../agent/mode.js";
 import {
   isHighRiskTool, toolCallKey, ApprovalPending,
@@ -104,6 +105,10 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
   let filesModified = false;
   const isSpaces = !!env.IS_SPACES;
   const agentMode = await resolveAgentMode(env, chatId).catch(() => 'build');
+  // Scope pesan terakhir: 'general' = permintaan umum (bukan kode/repo).
+  // Dipakai untuk hard-block tool repo di bawah (anti context-bleed).
+  // 'continue' (pesan pendek spt "lanjutkan") TIDAK diblokir — itu lanjutan topik sebelumnya.
+  const loopScope = detectScope(userPrompt || extractLatestUserText(currentContents));
   const resume = options.resume || null;
   if (resume?.contents) {
     currentContents = resume.contents;
@@ -387,6 +392,12 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
           if (agentMode === 'plan' && !isReadOnlyTool(name)) {
             console.warn(`[Plan Mode Blocked]: ${name}`);
             return { error: `mode plan aktif, tool "${name}" diblokir karena read-only. ketik /build buat eksekusi.` };
+          }
+          // Scope enforcement: pesan umum tidak boleh menyentuh tool repo/file lokal.
+          // Banner prompt saja terbukti diabaikan model — jadi diblokir keras di sini.
+          if (loopScope === 'general' && isRepoTool(name)) {
+            console.warn(`[Scope Blocked]: ${name} (pesan terakhir umum, bukan tugas repo)`);
+            return { error: `pesan terakhir user adalah permintaan umum, bukan tugas kode/repo — tool "${name}" diblokir. kerjakan HANYA permintaan terakhir user; jangan lanjutkan tugas lama dari riwayat chat. kalau user memang mau tugas repo/kode, minta mereka menyatakannya eksplisit.` };
           }
           // Approval gate: tool berisiko tinggi wajib dikonfirmasi user dulu (mode build)
           const tKey = toolCallKey(name, args || {});

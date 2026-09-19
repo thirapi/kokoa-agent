@@ -311,10 +311,10 @@ export const githubTools = [
           properties: {
             owner: { type: "STRING", description: "Username pemilik repo." },
             repo: { type: "STRING", description: "Nama repositori." },
-            path: { type: "STRING", description: "Path ke direktori (contoh: 'src/utils')." },
+            path: { type: "STRING", description: "Path ke direktori (contoh: 'src/utils'). Kosongkan untuk root repo." },
             ref: { type: "STRING", description: "Nama branch atau tag." },
           },
-          required: ["owner", "repo", "path"],
+          required: ["owner", "repo"],
         },
       },
       {
@@ -466,6 +466,20 @@ export const githubTools = [
             query: {
               type: "STRING",
               description: "Mood/genre/instrumen (misal: chill, rock, piano). Kata Inggris lebih akurat.",
+            },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "pipedAudioSearch",
+        description: "Mencari audio FULL lagu dari YouTube via Piped (tanpa key, cocok untuk lagu Indo mainstream). Stream asli YouTube itu m4a/webm (bukan mp3) — kirim audioUrl via sendAudio (Telegram bisa putar). Kalau hasil ada mp3Url (COBALT_INSTANCE diset), kirim mp3Url itu via sendAudio sebagai file MP3. URL cepat kedaluwarsa, jadi langsung kirim jangan ditunda.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: {
+              type: "STRING",
+              description: "Judul lagu + nama penyanyi.",
             },
           },
           required: ["query"],

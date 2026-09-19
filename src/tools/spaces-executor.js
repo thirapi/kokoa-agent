@@ -20,13 +20,25 @@ function resolvePath(inputPath, workspace) {
 async function executeSpacesTool(name, args, env, chatId) {
   switch (name) {
     case "cloneRepo": {
-      const repoUrl = `https://github.com/${args.repo}.git`;
+      // Repo private butuh token (set GITHUB_PAT_TOKEN di secrets HF Space).
+      // Tanpa token, clone repo private gagal dengan "could not read Username".
+      const gitToken = env.GITHUB_PAT_TOKEN || "";
+      const repoUrl = gitToken
+        ? `https://x-access-token:${gitToken}@github.com/${args.repo}.git`
+        : `https://github.com/${args.repo}.git`;
       const dirName = args.repo.replace(/[^a-zA-Z0-9_-]/g, "-");
       const targetDir = `/tmp/tg-bot/repos/${dirName}`;
-      execSync(
-        `rm -rf "${targetDir}" && mkdir -p /tmp/tg-bot/repos && git clone ${args.ref ? "-b " + args.ref + " " : ""}"${repoUrl}" "${targetDir}"`,
-        { stdio: "pipe", timeout: 60000 }
-      );
+      try {
+        execSync(
+          `rm -rf "${targetDir}" && mkdir -p /tmp/tg-bot/repos && git clone ${args.ref ? "-b " + args.ref + " " : ""}"${repoUrl}" "${targetDir}"`,
+          { stdio: "pipe", timeout: 60000 }
+        );
+      } catch (e) {
+        // JANGAN bocorkan token ke chat/history: ganti dengan placeholder sebelum dilempar.
+        let safe = String(e.message || e);
+        if (gitToken) safe = safe.split(gitToken).join("***");
+        throw new Error(safe || `gagal clone ${args.repo}`);
+      }
       env.__WORKSPACE = targetDir;
       const repoParts = args.repo.split("/");
       if (repoParts.length === 2) {

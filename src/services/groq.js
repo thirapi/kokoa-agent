@@ -46,7 +46,7 @@ const ESSENTIAL_TOOLS = [
   'remember', 'recall', 'recallAll', 'forget',
   'setReminder', 'getReminders', 'deleteReminder',
   'createTaskPlan', 'getTaskPlan', 'updateTaskStatus', 'clearTaskPlan',
-  'webSearch', 'webFetch', 'imageSearch', 'songSearch', 'youtubeSearch', 'freeMusicSearch', 'sendPhoto', 'sendAudio', 'sendLegalFile',
+  'webSearch', 'webFetch', 'imageSearch', 'songSearch', 'youtubeSearch', 'freeMusicSearch', 'pipedAudioSearch', 'sendPhoto', 'sendAudio', 'sendLegalFile',
   'triggerDeveloperWorkflow', 'checkWorkflowStatus',
   'createTrelloCard', 'getTrelloBoard', 'getTrelloLists', 'createTrelloList',
   'addTrelloChecklist', 'addTrelloAttachment', 'moveTrelloCard', 'updateTrelloCard', 'createTrelloBoard',
@@ -144,8 +144,8 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
     "oh iya, kamu bisa cari info di internet pake `webSearch` kalo ada yang gatau, " +
     "atau `webFetch` kalo mau baca halaman web. kalo pengguna nanya status workflow github, " +
     "pake `checkWorkflowStatus`. kalo diminta cari gambar, pake `imageSearch` lalu kirim via `sendPhoto`. " +
-    "kalo diminta cari lagu, pake `songSearch` lalu kirim cuplikannya via `sendAudio` (previewUrl). " +
-    "kalo user mau denger full: lagu mainstream -> `youtubeSearch` lalu bagikan watchUrl-nya (JANGAN kirim file mp3 bajakan). " +
+    "kalo diminta cari lagu, pake `songSearch` lalu kirim cuplikannya via `sendAudio` (previewUrl). kirim HANYA yang diminta user (minta audio saja -> jangan kirim photo/cover). " +
+    "kalo user mau denger full: lagu mainstream -> `youtubeSearch` lalu bagikan watchUrl-nya, ATAU `pipedAudioSearch` lalu kirim audioUrl-nya via `sendAudio` (kalau hasil ada mp3Url, kirim mp3Url itu). " +
     "musik gratis/cc -> `freeMusicSearch` lalu kirim downloadUrl-nya via `sendAudio` full + sebut artisnya.";
 
   const spacesHint =

@@ -24,6 +24,8 @@ try {
 const PORT = parseInt(process.env.PORT || '7860', 10);
 
 const workspaceStore = new Map();
+// Task plan in-session per chat (Spaces tidak punya D1). Bentuk: { [chatId]: { seq, items: [...] } }
+const tasksMemStore = {};
 const resultsStore = new Map();
 const RESULT_TTL = 60 * 60 * 1000; // 1 jam (sama dengan TTL pending di KV)
 setInterval(() => {
@@ -98,14 +100,25 @@ async function finishSpacesResult(stringChatId, { finalText, newContent, escalat
     }
   }
   if (newContent && newContent.length > 0) {
-    try {
-      await postWorkerJSON('/api/spaces-callback', {
-        chatId: stringChatId, newContents: newContent, token: 'kokoa-runner-secret', isFinal: true,
-      });
+    // Retry 3x: jalur Spaces -> Worker kadang ECONNRESET sesaat (TLS reset).
+    let synced = false;
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 3 && !synced; attempt++) {
+      try {
+        await postWorkerJSON('/api/spaces-callback', {
+          chatId: stringChatId, newContents: newContent, token: 'kokoa-runner-secret', isFinal: true,
+        });
+        synced = true;
+      } catch (e) {
+        lastErr = e;
+        if (attempt < 3) await new Promise(r => setTimeout(r, 2000 * attempt));
+      }
+    }
+    if (synced) {
       entry.historySynced = true;
       console.log(`[Spaces] Synced new history to D1 for chat ${stringChatId}`);
-    } catch (e) {
-      console.error('[Spaces] Failed sync to D1:', e.message);
+    } else {
+      console.error('[Spaces] Failed sync to D1 (3x):', lastErr?.message);
     }
   }
   return entry;
@@ -145,6 +158,7 @@ function buildProxyEnv(envVars) {
     GEMINI_SYSTEM_INSTRUCTION: envVars.GEMINI_SYSTEM_INSTRUCTION || '',
     WORKER_URL: envVars.WORKER_URL || '',
     IS_SPACES: 'true',
+    __TASKS_MEM: tasksMemStore,
     CHAT_HISTORY: {
       get: async (key) => inMemoryKV.get(key) || null,
       put: async (key, value, opts) => {
@@ -156,12 +170,16 @@ function buildProxyEnv(envVars) {
       delete: async (key) => inMemoryKV.delete(key),
     },
     DB: {
+      // Stub D1: task plan & pengingat jalan di memori in-session (lihat __TASKS_MEM),
+      // sisanya no-op aman. .all()/.batch() wajib ada — db/index.js memakainya.
       prepare: () => ({
         bind: () => ({
           run: async () => {},
           first: async () => null,
+          all: async () => ({ results: [] }),
         }),
       }),
+      batch: async () => [],
     },
   };
   return proxyEnv;

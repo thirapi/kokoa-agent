@@ -82,11 +82,12 @@ export async function sendTelegramPhoto(token, chatId, photoUrl, caption = "") {
     payload.caption = caption.slice(0, 1000);
     payload.parse_mode = "HTML";
   }
+  // 30s: Telegram harus download dulu file gambar dari URL remote (seperti sendAudio).
   let res = await fetchWithTimeout(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  });
+  }, 30000);
   if (!res.ok && caption) {
     delete payload.parse_mode;
     payload.caption = stripHtml(caption).slice(0, 1000);
@@ -94,7 +95,7 @@ export async function sendTelegramPhoto(token, chatId, photoUrl, caption = "") {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
-    });
+    }, 30000);
   }
   if (!res.ok) {
     const errText = await res.text().catch(() => "");

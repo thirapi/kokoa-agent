@@ -48,9 +48,14 @@ export function detectScope(latestText) {
 }
 
 export function buildScopeBanner(scope, hasRepoContext) {
-  if (scope === 'general' && hasRepoContext) {
+  if (scope === 'general') {
     return "mode umum: pesan terakhir user adalah permintaan umum, bukan tugas kode/repo. " +
-      "abaikan repo aktif dan workspace lokal sepenuhnya. " +
+      "kerjakan HANYA permintaan terakhir itu — jangan melanjutkan/mengulang tugas lama dari riwayat chat " +
+      "kecuali user memintanya. kirim HANYA apa yang diminta user " +
+      "(misal minta audio saja -> jangan kirim photo/cover; minta info saja -> jangan kirim file). " +
+      (hasRepoContext
+        ? "abaikan repo aktif dan workspace lokal sepenuhnya. "
+        : "") +
       "jawab langsung tanpa memanggil tool repo/file lokal " +
       "(cloneRepo, readLocalFile, listLocalDir, grepLocalFiles, runCommand, getFileContent, searchInFiles, " +
       "listDirectoryContents, createOrUpdateFile, createPullRequest, triggerDeveloperWorkflow). " +

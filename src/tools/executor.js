@@ -1,6 +1,6 @@
 import { callGitHubAPI } from "../services/github.js";
 import { bufferToBase64 } from "../utils/array.js";
-import { webSearch, webFetch, imageSearch, songSearch, youtubeSearch, freeMusicSearch } from "../services/search.js";
+import { webSearch, webFetch, imageSearch, songSearch, youtubeSearch, freeMusicSearch, pipedAudioSearch } from "../services/search.js";
 import { sendTelegramPhoto, sendTelegramAudio } from "../services/telegram.js";
 import {
   getTrelloBoard,
@@ -158,7 +158,8 @@ export async function executeTool(name, args, env, chatId) {
       return callGitHubAPI(env, endpoint, "PATCH", body);
     }
     case "listDirectoryContents": {
-      const endpoint = `repos/${args.owner}/${args.repo}/contents/${args.path}${args.ref ? "?ref=" + args.ref : ""}`;
+      const dirPath = (args.path || "").replace(/^\/+/, "");
+      const endpoint = `repos/${args.owner}/${args.repo}/contents${dirPath ? "/" + dirPath : ""}${args.ref ? "?ref=" + args.ref : ""}`;
       return callGitHubAPI(env, endpoint);
     }
     case "deleteFile": {
@@ -227,6 +228,9 @@ export async function executeTool(name, args, env, chatId) {
     }
     case "freeMusicSearch": {
       return await freeMusicSearch(args.query);
+    }
+    case "pipedAudioSearch": {
+      return await pipedAudioSearch(args.query, env);
     }
     case "sendLegalFile": {
       if (!env.TELEGRAM_BOT_TOKEN) return { error: "Token Telegram tidak tersedia." };
