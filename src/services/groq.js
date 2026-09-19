@@ -77,7 +77,7 @@ function extractLatestUserText(contents) {
   return '';
 }
 
-function selectTools(text, isSpaces) {
+export function selectTools(text, isSpaces) {
   const lower = text.toLowerCase();
   const needsGithub = GITHUB_KEYWORDS.some(kw => lower.includes(kw));
   const needsSpaces = isSpaces && SPACES_KEYWORDS.some(kw => lower.includes(kw));
@@ -106,7 +106,7 @@ function estimateTokens(str) {
   return Math.ceil(str.length / 4);
 }
 
-async function buildSystemMessage(env, chatId) {
+export async function buildSystemMessage(env, chatId) {
   const personaReinforcement =
     "inget ya, kamu cocoa. jangan pernah pake emoji di chat. " +
     "kalo obrolan santai, respon santai aja. kalo lg analisis teknis, respon detail & struktural. " +
@@ -229,7 +229,7 @@ async function buildSystemMessage(env, chatId) {
   return { role: "system", content: finalSystemInstruction };
 }
 
-function convertContentsToMessages(contents) {
+export function convertContentsToMessages(contents) {
   const messages = [];
   let pendingToolCalls = [];
 
@@ -302,7 +302,7 @@ function convertContentsToMessages(contents) {
   return messages;
 }
 
-function convertGroqResponse(groqData) {
+export function convertGroqResponse(groqData) {
   const choice = groqData.choices?.[0];
   if (!choice) throw new Error("GROQ_EMPTY_RESPONSE: Groq returned empty response");
 
@@ -352,6 +352,7 @@ export async function fetchGroqGenerate(model, key, contents, env, chatId) {
   const userText = extractLatestUserText(contents);
   const tools = selectTools(userText, env.IS_SPACES);
 
+  const MAX_INPUT_TOKENS = 9000;
   let convMessages = compactMessages([systemMessage, ...messages], MAX_INPUT_TOKENS);
 
   const payload = {
