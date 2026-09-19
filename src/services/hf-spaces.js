@@ -43,6 +43,10 @@ export async function processViaSpaces(env, chatId, userPrompt, mediaData, histo
 
   if (result.status === "processing") {
     await addPendingSpace(env, chatId);
+    // Reset penanda antar-sesi: callback_done/hdl milik percobaan SEBELUMNI (TTL 300s/120s)
+    // tidak boleh memblokir pengiriman hasil percobaan INI.
+    await env.CHAT_HISTORY.delete(`callback_done:${chatId}`).catch(() => {});
+    await env.CHAT_HISTORY.delete(`hdl:${chatId}`).catch(() => {});
     return { status: "processing" };
   }
 
