@@ -12,6 +12,26 @@ function fetchWithTimeout(url, options, timeoutMs = 10000) {
     .catch(err => { clearTimeout(timeoutId); throw err; });
 }
 
+// POST ke Telegram dengan 1x retry KHUSUS saat fetch-nya sendiri gagal (network abort/reset).
+// Aman dari double-send: retry hanya bila request tidak pernah sampai (throw),
+// bukan saat Telegram sudah merespons (!ok ditangani caller via fallback).
+async function postTGWithRetry(url, payload, timeoutMs = 10000) {
+  try {
+    return await fetchWithTimeout(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }, timeoutMs);
+  } catch (e) {
+    await new Promise(r => setTimeout(r, 2000));
+    return await fetchWithTimeout(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }, timeoutMs);
+  }
+}
+
 export async function sendTelegramAction(token, chatId, action) {
   return fetchWithTimeout(TG_API(token, "sendChatAction"), {
     method: "POST",
@@ -83,19 +103,11 @@ export async function sendTelegramPhoto(token, chatId, photoUrl, caption = "") {
     payload.parse_mode = "HTML";
   }
   // 30s: Telegram harus download dulu file gambar dari URL remote (seperti sendAudio).
-  let res = await fetchWithTimeout(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  }, 30000);
+  let res = await postTGWithRetry(url, payload, 30000);
   if (!res.ok && caption) {
     delete payload.parse_mode;
     payload.caption = stripHtml(caption).slice(0, 1000);
-    res = await fetchWithTimeout(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }, 30000);
+    res = await postTGWithRetry(url, payload, 30000);
   }
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
@@ -114,19 +126,11 @@ export async function sendTelegramAudio(token, chatId, audioUrl, performer = "",
     payload.caption = caption.slice(0, 1000);
     payload.parse_mode = "HTML";
   }
-  let res = await fetchWithTimeout(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  }, 30000);
+  let res = await postTGWithRetry(url, payload, 30000);
   if (!res.ok && (caption || performer || title)) {
     delete payload.parse_mode;
     if (payload.caption) payload.caption = stripHtml(payload.caption).slice(0, 1000);
-    res = await fetchWithTimeout(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }, 30000);
+    res = await postTGWithRetry(url, payload, 30000);
   }
   if (!res.ok) {
     const errText = await res.text().catch(() => "");

@@ -302,6 +302,15 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
               break;
             }
 
+            // Kuota Gemini free-tier itu per-MODEL-per-project (lihat quotaId
+            // GenerateRequestsPerDayPerProjectPerModel): ganti key tidak membantu,
+            // semua key 429 juga. Langsung skip modelnya agar tidak membakar iterasi
+            // dan tidak menendang seluruh provider (model lain masih punya kuota sendiri).
+            if (name === 'gemini' && (errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("429"))) {
+              blacklistedModels.add(model);
+              break;
+            }
+
             const isRetryable = errMsg.includes("TIMEOUT_TRIGGER") ||
               errMsg.includes("GEMINI_RETRY_TRIGGER") ||
               errMsg.includes("GROQ_RATE_LIMIT") ||

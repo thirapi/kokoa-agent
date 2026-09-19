@@ -473,7 +473,7 @@ export const githubTools = [
       },
       {
         name: "pipedAudioSearch",
-        description: "Mencari audio FULL lagu dari YouTube via Piped (tanpa key, cocok untuk lagu Indo mainstream). Stream asli YouTube itu m4a/webm (bukan mp3) — kirim audioUrl via sendAudio (Telegram bisa putar). Kalau hasil ada mp3Url (COBALT_INSTANCE diset), kirim mp3Url itu via sendAudio sebagai file MP3. URL cepat kedaluwarsa, jadi langsung kirim jangan ditunda.",
+        description: "Mencari audio FULL lagu dari YouTube via Piped (tanpa key, cocok untuk lagu Indo mainstream). Stream asli YouTube itu m4a/webm (bukan mp3) — kirim audioUrl via sendAudio (Telegram bisa putar). Kalau hasil ada mp3Url (COBALT_INSTANCE diset), kirim mp3Url itu via sendAudio sebagai file MP3. URL cepat kedaluwarsa, jadi langsung kirim jangan ditunda. CATATAN: instance Piped publik sering mati semua — kalau tool ini gagal, fallback ke youtubeSearch (bagikan watchUrl) dan JANGAN ulangi pipedAudioSearch berkali-kali dalam satu sesi.",
         parameters: {
           type: "OBJECT",
           properties: {

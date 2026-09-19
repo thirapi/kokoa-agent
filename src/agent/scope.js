@@ -53,6 +53,8 @@ export function buildScopeBanner(scope, hasRepoContext) {
       "kerjakan HANYA permintaan terakhir itu — jangan melanjutkan/mengulang tugas lama dari riwayat chat " +
       "kecuali user memintanya. kirim HANYA apa yang diminta user " +
       "(misal minta audio saja -> jangan kirim photo/cover; minta info saja -> jangan kirim file). " +
+      "di jawaban akhir, JANGAN sebut-sebut repo, file, atau tugas lama dari riwayat " +
+      "(misal jangan menawarkan melanjutkan proyek kemarin) kecuali user membahasnya di pesan terakhir. " +
       (hasRepoContext
         ? "abaikan repo aktif dan workspace lokal sepenuhnya. "
         : "") +
