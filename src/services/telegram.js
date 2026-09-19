@@ -4,6 +4,55 @@ import { splitIntoChunks, stripHtml } from "../utils/formatter.js";
 const TG_API = (token, method) =>
   `https://api.telegram.org/bot${token}/${method}`;
 
+// Info publik user Telegram: nama, username, bio (bila dikembalikan API), foto profil.
+// Hanya bisa untuk user yang pernah berinteraksi (punya user_id dari reply/konteks chat).
+// Username saja (@seseorang) TIDAK bisa di-resolve — Telegram tidak mengizinkan bot lookup sembarang user.
+// photoFileId dikembalikan (bukan URL) agar token bot tidak bocor ke history;
+// teruskan langsung ke sendPhoto sebagai imageUrl (Telegram menerima file_id).
+export async function getTelegramUserInfo(token, userId) {
+  const id = String(userId || "").trim();
+  if (!id) throw new Error("userId kosong.");
+  const chatRes = await fetchWithTimeout(TG_API(token, "getChat"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: id }),
+  }, 15000);
+  if (!chatRes.ok) {
+    const errText = await chatRes.text().catch(() => "");
+    throw new Error(`getChat gagal (${chatRes.status}): ${errText.slice(0, 150)}`);
+  }
+  const chat = (await chatRes.json()).result || {};
+  const photosRes = await fetchWithTimeout(TG_API(token, "getUserProfilePhotos"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: Number(id), limit: 1 }),
+  }, 15000);
+  let photoFileId = null;
+  let photoCount = 0;
+  if (photosRes.ok) {
+    const pdata = await photosRes.json();
+    photoCount = pdata.result?.total_count || 0;
+    const biggest = pdata.result?.photos?.[0];
+    if (biggest && biggest.length > 0) {
+      photoFileId = biggest[biggest.length - 1].file_id || null;
+    }
+  }
+  const firstName = chat.first_name || "";
+  const lastName = chat.last_name || "";
+  return {
+    id: chat.id ?? Number(id),
+    name: `${firstName} ${lastName}`.trim() || "(tanpa nama)",
+    username: chat.username ? `@${chat.username}` : "(tanpa username)",
+    bio: chat.bio || null,
+    bioNote: chat.bio ? null : "bio tidak dikembalikan API (user menyembunyikan atau belum pasang).",
+    photoCount,
+    photoFileId,
+    photoNote: photoFileId
+      ? "teruskan photoFileId ini sebagai imageUrl ke sendPhoto untuk mengirim foto profilnya."
+      : "tidak ada foto profil yang bisa diambil.",
+  };
+}
+
 function fetchWithTimeout(url, options, timeoutMs = 10000) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);

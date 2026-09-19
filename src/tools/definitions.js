@@ -486,6 +486,20 @@ export const githubTools = [
         },
       },
       {
+        name: "inspectTelegramUser",
+        description: "Melihat info publik user Telegram: nama, username, bio (bila ada), dan foto profil (photoFileId). Pakai user_id dari KONTEKS REPLY (pesan user me-reply pesan siapa — id-nya dicantumkan di konteks). Username saja (@seseorang) TIDAK bisa di-resolve — harus user_id. Untuk mengirim foto profilnya, panggil sendPhoto dengan imageUrl = photoFileId ini. Hanya info publik, jangan janjikan data privat (no HP, last seen).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            userId: {
+              type: "STRING",
+              description: "ID numerik user Telegram (dari konteks reply).",
+            },
+          },
+          required: ["userId"],
+        },
+      },
+      {
         name: "sendLegalFile",
         description: "Mengirim file audio/gambar FULL dari URL langsung ke chat. HANYA untuk sumber legal (Creative Commons/public domain). Domain yang diizinkan: ccmixter.org, upload.wikimedia.org. URL lain DITOLAK. Pakai untuk downloadUrl dari freeMusicSearch.",
         parameters: {

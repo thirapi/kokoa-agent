@@ -6,11 +6,77 @@ import { executeTool } from './tools/executor.js';
 import { executeSpacesTool, isSpacesTool } from './tools/spaces-executor.js';
 import { ApprovalPending, approvalButtons, approvalPromptText } from './agent/approval.js';
 
+function isDirectNetworkError(e) {
+  const m = String(e?.message || e);
+  // Error API Telegram ("gagal (4xx)") BUKAN network — jangan fallback.
+  if (/gagal \(\d{3}\)/.test(m)) return false;
+  return /fetch failed|aborted|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket|timeout|network/i.test(m);
+}
+
+// Kirim via Worker proxy (Worker -> Telegram, bukan Spaces -> Telegram).
+// Dipakai sebagai fallback saat egress Spaces putus tapi jalur ke Worker masih hidup.
+function proxyTelegramDirect(method, body, timeoutMs = 45000) {
+  if (!lastWorkerUrl) return Promise.resolve(null);
+  const bodyStr = JSON.stringify(body);
+  return new Promise((resolve) => {
+    try {
+      const u = new URL(`/api/telegram-proxy/${method}`, lastWorkerUrl);
+      const req = https.request({
+        hostname: u.hostname,
+        path: u.pathname,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer kokoa-runner-secret',
+          'Content-Length': Buffer.byteLength(bodyStr),
+        },
+        timeout: timeoutMs,
+      }, (res) => {
+        let data = '';
+        res.on('data', c => data += c);
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); } catch { resolve(null); }
+        });
+      });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { req.destroy(); resolve(null); });
+      req.write(bodyStr);
+      req.end();
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+export { isDirectNetworkError, proxyTelegramDirect };
+
 async function hybridExecutor(name, args, env, chatId) {
   if (isSpacesTool(name)) {
     return executeSpacesTool(name, args, env, chatId);
   }
-  return executeTool(name, args, env, chatId);
+  try {
+    return await executeTool(name, args, env, chatId);
+  } catch (e) {
+    // Fallback media: Spaces -> Telegram putus, coba Worker -> Telegram.
+    if ((name === 'sendPhoto' || name === 'sendAudio') && isDirectNetworkError(e)) {
+      console.log(`[Spaces] Direct ${name} gagal (${e.message}), coba via Worker proxy...`);
+      const body = name === 'sendPhoto'
+        ? { chat_id: Number(chatId), photo: args.imageUrl, ...(args.caption ? { caption: String(args.caption).slice(0, 1000) } : {}) }
+        : {
+            chat_id: Number(chatId), audio: args.audioUrl,
+            ...(args.performer ? { performer: String(args.performer).slice(0, 200) } : {}),
+            ...(args.title ? { title: String(args.title).slice(0, 200) } : {}),
+            ...(args.caption ? { caption: String(args.caption).slice(0, 1000) } : {}),
+          };
+      const r = await proxyTelegramDirect(name === 'sendPhoto' ? 'sendPhoto' : 'sendAudio', body);
+      if (r?.ok) {
+        console.log(`[Spaces] ${name} terkirim via Worker proxy`);
+        return r.result || { ok: true, via: 'worker-proxy' };
+      }
+      console.log(`[Spaces] Worker proxy juga gagal untuk ${name}`);
+    }
+    throw e;
+  }
 }
 
 // Install system dependencies at startup

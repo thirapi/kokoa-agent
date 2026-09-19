@@ -1,7 +1,7 @@
 import { callGitHubAPI } from "../services/github.js";
 import { bufferToBase64 } from "../utils/array.js";
 import { webSearch, webFetch, imageSearch, songSearch, youtubeSearch, freeMusicSearch, pipedAudioSearch } from "../services/search.js";
-import { sendTelegramPhoto, sendTelegramAudio } from "../services/telegram.js";
+import { sendTelegramPhoto, sendTelegramAudio, getTelegramUserInfo } from "../services/telegram.js";
 import {
   getTrelloBoard,
   getTrelloLists,
@@ -264,6 +264,13 @@ export async function executeTool(name, args, env, chatId) {
     case "sendAudio": {
       if (!env.TELEGRAM_BOT_TOKEN) return { error: "Token Telegram tidak tersedia." };
       return await sendTelegramAudio(env.TELEGRAM_BOT_TOKEN, chatId, args.audioUrl, args.performer || "", args.title || "", args.caption || "");
+    }
+    case "inspectTelegramUser": {
+      if (!env.TELEGRAM_BOT_TOKEN) return { error: "Token Telegram tidak tersedia." };
+      if (!args.userId) {
+        return { error: "userId kosong. Minta user reply pesan orangnya dulu — user_id ada di konteks reply. Username saja (@seseorang) tidak bisa di-resolve oleh API Telegram." };
+      }
+      return await getTelegramUserInfo(env.TELEGRAM_BOT_TOKEN, args.userId);
     }
     case "createTaskPlan": {
       await clearTasks(env, chatId).catch(() => {});

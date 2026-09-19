@@ -46,7 +46,7 @@ const ESSENTIAL_TOOLS = [
   'remember', 'recall', 'recallAll', 'forget',
   'setReminder', 'getReminders', 'deleteReminder',
   'createTaskPlan', 'getTaskPlan', 'updateTaskStatus', 'clearTaskPlan',
-  'webSearch', 'webFetch', 'imageSearch', 'songSearch', 'youtubeSearch', 'freeMusicSearch', 'pipedAudioSearch', 'sendPhoto', 'sendAudio', 'sendLegalFile',
+  'webSearch', 'webFetch', 'imageSearch', 'songSearch', 'youtubeSearch', 'freeMusicSearch', 'pipedAudioSearch', 'inspectTelegramUser', 'sendPhoto', 'sendAudio', 'sendLegalFile',
   'triggerDeveloperWorkflow', 'checkWorkflowStatus',
   'createTrelloCard', 'getTrelloBoard', 'getTrelloLists', 'createTrelloList',
   'addTrelloChecklist', 'addTrelloAttachment', 'moveTrelloCard', 'updateTrelloCard', 'createTrelloBoard',
@@ -146,7 +146,8 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
     "pake `checkWorkflowStatus`. kalo diminta cari gambar, pake `imageSearch` lalu kirim via `sendPhoto`. " +
     "kalo diminta cari lagu, pake `songSearch` lalu kirim cuplikannya via `sendAudio` (previewUrl). kirim HANYA yang diminta user (minta audio saja -> jangan kirim photo/cover). " +
     "kalo user mau denger full: lagu mainstream -> `youtubeSearch` lalu bagikan watchUrl-nya, ATAU `pipedAudioSearch` lalu kirim audioUrl-nya via `sendAudio` (kalau hasil ada mp3Url, kirim mp3Url itu). " +
-    "musik gratis/cc -> `freeMusicSearch` lalu kirim downloadUrl-nya via `sendAudio` full + sebut artisnya.";
+    "musik gratis/cc -> `freeMusicSearch` lalu kirim downloadUrl-nya via `sendAudio` full + sebut artisnya. " +
+    "kalo user reply pesan orang dan minta info/impression tentang dia -> `inspectTelegramUser` pakai user_id dari konteks reply, lalu sampaikan nama/username/bio + kirim foto profilnya via `sendPhoto` (imageUrl = photoFileId).";
 
   const spacesHint =
     "Kamu jalan di dedicated server dengan akses PENUH:\n" +
@@ -191,6 +192,14 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
   const scopeBanner = env.IS_SPACES
     ? buildScopeBanner(scope, hasRepoContext)
     : null;
+  // Scope umum: cabut SEMUA konteks repo/code dari system prompt (bukan cuma imbauan).
+  // Model terbukti tetap menyeret topik repo lama ke jawaban hanya karena blok ini ada di konteks.
+  const isGeneralScope = scope === 'general';
+  const generalLimitsContext =
+    "[batasan lingkungan:]\n" +
+    "- kerjakan langsung permintaan umum user (cari info/gambar/lagu, jawab pertanyaan)\n" +
+    "- kamu bisa akses web search dan memory\n" +
+    "- jangan tawarkan atau kerjakan tugas kode/repo";
   const modeBanner = env.AGENT_MODE === 'plan' ? planModeBanner() : null;
   const workspaceContext = env.__WORKSPACE
     ? `[Workspace aktif: repo (${currentRepoName || 'unknown'}) sudah ter-clone di ${env.__WORKSPACE}. Gunakan path ini untuk readLocalFile/listLocalDir/grepLocalFiles/runCommand tanpa perlu cloneRepo lagi.]`
@@ -245,20 +254,20 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
     systemPersona,
     systemInstruction,
     memoryContext,
-    env.IS_SPACES ? repoContext : null,
-    env.IS_SPACES ? workspaceContext : null,
+    (env.IS_SPACES && !isGeneralScope) ? repoContext : null,
+    (env.IS_SPACES && !isGeneralScope) ? workspaceContext : null,
     scopeBanner,
     skillsBlock || null,
     modeBanner,
-    limitsContext,
+    isGeneralScope ? generalLimitsContext : limitsContext,
     webToolHint,
     trelloHint,
-    env.IS_SPACES ? spacesHint : null,
+    (env.IS_SPACES && !isGeneralScope) ? spacesHint : null,
     contextHint,
-    planningHint,
+    isGeneralScope ? null : planningHint,
     memoryHint,
     reminderHint,
-    approvalHint,
+    isGeneralScope ? null : approvalHint,
     personaReinforcement,
     unrestrictedInstruction,
     timeContext,

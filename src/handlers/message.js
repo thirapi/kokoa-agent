@@ -642,6 +642,17 @@ export async function processMessage(message, env) {
     let mediaData = null;
     let userPrompt = message.text || message.caption || "";
 
+    // Konteks reply: siapa yang di-reply (nama + user_id) agar model bisa pakai
+    // inspectTelegramUser bila user minta info/impression tentang orang tersebut.
+    const repliedFrom = message.reply_to_message?.from;
+    if (repliedFrom && !repliedFrom.is_bot) {
+      const rName = `${repliedFrom.first_name || ""} ${repliedFrom.last_name || ""}`.trim() || "(tanpa nama)";
+      const rUname = repliedFrom.username ? `@${repliedFrom.username}` : "(tanpa username)";
+      const rSnippet = (message.reply_to_message.text || message.reply_to_message.caption || "").slice(0, 300);
+      userPrompt += `\n\n[konteks reply: pesan ini membalas pesan dari ${rName} (${rUname}, user_id: ${repliedFrom.id})` +
+        (rSnippet ? ` berisi: "${rSnippet}"` : "") + `]`;
+    }
+
     if (message.photo) {
       const fileId = message.photo[message.photo.length - 1].file_id;
       mediaData = await prepareMediaPart(
