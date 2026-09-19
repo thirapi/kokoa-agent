@@ -14,6 +14,18 @@ export function isWriteTool(toolName) {
   return WRITE_TOOLS.has(toolName);
 }
 
+// Subset yang benar-benar mengubah FILE repo/lokal. Hanya ini yang boleh
+// menaikkan flag filesModified (pemicu self-reflection "cek sintaks/tsc").
+// Kirim foto/audio, remember, task plan, reminder = BUKAN modifikasi file.
+const FILE_MODIFYING_TOOLS = new Set([
+  'createOrUpdateFile', 'deleteFile', 'runCommand', 'executeCommand',
+  'triggerDeveloperWorkflow', 'createPullRequest', 'mergePullRequest',
+]);
+
+export function modifiesRepoFiles(toolName) {
+  return FILE_MODIFYING_TOOLS.has(toolName);
+}
+
 export function safeTruncate(output, maxChars = 15000) {
   if (output === null || output === undefined) return output;
   if (typeof output === 'string') {

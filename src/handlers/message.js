@@ -8,7 +8,7 @@ import {
   sendTelegramMessage,
 } from "../services/telegram.js";
 import { executeTool } from "../tools/executor.js";
-import { runHarnessToolCall, isWriteTool } from "../tools/harness.js";
+import { runHarnessToolCall, isWriteTool, modifiesRepoFiles } from "../tools/harness.js";
 import { validateToolArgs, isReadOnlyTool } from "../agent/registry.js";
 import { detectScope, extractLatestUserText, isRepoTool } from "../agent/scope.js";
 import { resolveAgentMode } from "../agent/mode.js";
@@ -123,7 +123,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
       console.log(`[Approval] Executing granted tool ${pTool} on resume`);
       const res = await runHarnessToolCall(pTool, pArgs || {}, env, chatId, toolCache, { toolExecutor: execTool });
       pResult = res.ok ? res.result : { error: res.error };
-      if (isWriteTool(pTool)) filesModified = true;
+      if (modifiesRepoFiles(pTool)) filesModified = true;
     } else {
       console.log(`[Approval] Denied tool ${pTool} on resume`);
       pResult = { error: "user membatalkan tool ini. jelaskan secara singkat, tawarkan alternatif, dan jangan panggil lagi tool yang sama." };
@@ -451,7 +451,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
             }
           }
           console.log(`Executing Tool: ${name}`, args);
-          if (isWriteTool(name)) {
+          if (modifiesRepoFiles(name)) {
             filesModified = true;
           }
           await sendProgress(`Menjalankan ${name}...`);
@@ -536,6 +536,10 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
     if (functionCalls.length === 0) break;
   }
 
+  // Buang pesan self-reflection internal ("cek sintaks/tsc...") agar tidak
+  // tersimpan ke history (Worker) maupun snapshot approval (Spaces) — kalau bocor,
+  // sesi-sesi berikutnya terus ngomongin kode walau user cuma minta foto.
+  currentContents = currentContents.filter(c => !c._selfReflection);
   return { finalText, escalationTriggered, contents: currentContents };
 }
 
