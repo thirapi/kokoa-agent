@@ -431,7 +431,7 @@ export const githubTools = [
       },
       {
         name: "songSearch",
-        description: "Mencari lagu (judul, penyanyi, album, preview audio 30 detik, cover). Panggil sendAudio dengan previewUrl untuk mengirim cuplikan lagu ke chat.",
+        description: "Mencari lagu (judul, penyanyi, album, preview audio 30 detik, cover, link lagu full). Panggil sendAudio dengan previewUrl untuk mengirim cuplikan ke chat, dan sertakan songUrl agar user bisa dengar full di Apple Music/Spotify.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -441,6 +441,61 @@ export const githubTools = [
             },
           },
           required: ["query"],
+        },
+      },
+      {
+        name: "youtubeSearch",
+        description: "Mencari video YouTube (cocok untuk full lagu/musik). Hasil berupa judul, channel, dan link tonton. Bagikan watchUrl ke user agar bisa dengar/nonton full di YouTube.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: {
+              type: "STRING",
+              description: "Judul lagu/video dan/atau nama artis/channel.",
+            },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "freeMusicSearch",
+        description: "Mencari musik gratis berlisensi Creative Commons (ccMixter). Hasil ada downloadUrl MP3 full + info lisensi. Kirim via sendAudio dengan performer=artis. JANGAN dipakai untuk lagu mainstream berhak cipta (pakai songSearch+youtubeSearch untuk itu).",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: {
+              type: "STRING",
+              description: "Mood/genre/instrumen (misal: chill, rock, piano). Kata Inggris lebih akurat.",
+            },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "sendLegalFile",
+        description: "Mengirim file audio/gambar FULL dari URL langsung ke chat. HANYA untuk sumber legal (Creative Commons/public domain). Domain yang diizinkan: ccmixter.org, upload.wikimedia.org. URL lain DITOLAK. Pakai untuk downloadUrl dari freeMusicSearch.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            fileUrl: {
+              type: "STRING",
+              description: "URL langsung ke file.",
+            },
+            kind: {
+              type: "STRING",
+              description: "'audio', 'image', atau 'auto' (tebak dari ekstensi).",
+              enum: ["audio", "image", "auto"],
+            },
+            performer: {
+              type: "STRING",
+              description: "Nama artis (untuk audio, wajib diisi sebagai atribusi lisensi).",
+            },
+            title: {
+              type: "STRING",
+              description: "Judul (opsional).",
+            },
+          },
+          required: ["fileUrl"],
         },
       },
       {

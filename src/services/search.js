@@ -111,19 +111,128 @@ export async function songSearch(query) {
     album: t.collectionName || "",
     previewUrl: t.previewUrl || "",
     artworkUrl: (t.artworkUrl100 || "").replace("100x100", "600x600"),
+    songUrl: t.trackViewUrl || "",
   }));
   if (results.length === 0) return { message: "Tidak ada lagu yang ketemu. Coba kata kunci lain ya!" };
   return results;
 }
 
+// Groq built-in browser search (server-side, Exa-powered, no scraping).
+// Model default kita (gpt-oss-20b/120b) support native — jauh lebih andal dari scrape Bing.
+async function searchGroqBrowser(query, env) {
+  const keys = ((env && env.GROQ_API_KEY) || "").split(",").map(k => k.trim()).filter(Boolean);
+  if (keys.length === 0) throw new Error("Tidak ada GROQ_API_KEY");
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${keys[0]}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "openai/gpt-oss-20b",
+      messages: [
+        { role: "user", content: `jawab ringkas dalam bahasa indonesia berdasarkan hasil browsing: ${query}` },
+      ],
+      temperature: 1,
+      max_completion_tokens: 2048,
+      top_p: 1,
+      stream: false,
+      reasoning_effort: "low",
+      tool_choice: "required",
+      tools: [{ type: "browser_search" }],
+    }),
+    signal: AbortSignal.timeout(25000),
+  });
+  if (!res.ok) throw new Error(`Groq browser_search HTTP ${res.status}`);
+  const data = await res.json();
+  const content = data.choices?.[0]?.message?.content?.trim();
+  if (!content) throw new Error("Groq browser_search kosong");
+  return content;
+}
+
+// YouTube search via Invidious public API (tanpa key).
+// Dipakai untuk full playback legal: bot bagikan link watch, user putar di YouTube.
+export async function youtubeSearch(query) {
+  const instances = [
+    "https://invidious.f5.si",
+    "https://inv.invidious.nerdvpn.de",
+    "https://vid.puffyan.us",
+  ];
+  const errors = [];
+  for (const base of instances) {
+    try {
+      const url = `${base}/api/v1/search?q=${encodeURIComponent(query)}&page=1&type=video`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": "TelegramBot/1.0 (Cocoa)" },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const results = (Array.isArray(data) ? data : [])
+        .filter(r => r.type === "video" && r.videoId)
+        .slice(0, 5)
+        .map(r => ({
+          title: r.title || "",
+          channel: r.author || "",
+          videoId: r.videoId,
+          watchUrl: `https://www.youtube.com/watch?v=${r.videoId}`,
+        }));
+      if (results.length === 0) continue;
+      return results;
+    } catch (e) {
+      errors.push(`${base}: ${e.message}`);
+    }
+  }
+  throw new Error("Semua YouTube backend gagal: " + errors.join("; "));
+}
+
+// Musik gratis berlisensi Creative Commons (ccMixter, tanpa key).
+// Satu-satunya jalur file-full yang legal: kirim downloadUrl via sendAudio + cantumkan artis.
+export async function freeMusicSearch(query) {
+  const url = `https://ccmixter.org/api/query?f=json&limit=2&tags=${encodeURIComponent(query)}`;
+  let data = null;
+  let lastErr = "";
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: { "User-Agent": "TelegramBot/1.0 (Cocoa)" },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!res.ok) throw new Error(`ccMixter HTTP ${res.status}`);
+      data = await res.json();
+      break;
+    } catch (e) {
+      lastErr = e.message;
+      await new Promise(r => setTimeout(r, 1500 * attempt));
+    }
+  }
+  if (!data) throw new Error(`ccMixter gagal 3x: ${lastErr}`);
+  const results = (Array.isArray(data) ? data : [])
+    .map(u => {
+      const mp3 = (u.files || []).find(f => f.file_nicname === 'mp3' && f.download_url);
+      if (!mp3) return null;
+      return {
+        title: u.upload_name || "",
+        artist: u.user_real_name || u.user_name || "",
+        license: u.license_name || "",
+        licenseUrl: u.license_url || "",
+        downloadUrl: mp3.download_url,
+        pageUrl: u.file_page_url || "",
+      };
+    })
+    .filter(Boolean);
+  if (results.length === 0) return { message: "Tidak ada musik gratis yang cocok. Coba kata kunci mood/genre (misal: chill, rock, jazz) ya!" };
+  return results;
+}
+
 export async function webSearch(query, env) {
   const errors = [];
-  for (const searchFn of [searchBing, searchSearxng]) {
+  for (const searchFn of [(q) => searchGroqBrowser(q, env), searchBing, searchSearxng]) {
     try {
       const result = await searchFn(query);
       if (result) return result;
     } catch (e) {
-      errors.push(`${searchFn.name}: ${e.message}`);
+      errors.push(`${searchFn.name || 'groqBrowser'}: ${e.message}`);
     }
   }
   throw new Error("Semua search backend gagal: " + errors.join("; "));

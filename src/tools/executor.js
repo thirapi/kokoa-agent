@@ -1,6 +1,6 @@
 import { callGitHubAPI } from "../services/github.js";
 import { bufferToBase64 } from "../utils/array.js";
-import { webSearch, webFetch, imageSearch, songSearch } from "../services/search.js";
+import { webSearch, webFetch, imageSearch, songSearch, youtubeSearch, freeMusicSearch } from "../services/search.js";
 import { sendTelegramPhoto, sendTelegramAudio } from "../services/telegram.js";
 import {
   getTrelloBoard,
@@ -221,6 +221,37 @@ export async function executeTool(name, args, env, chatId) {
     }
     case "songSearch": {
       return await songSearch(args.query);
+    }
+    case "youtubeSearch": {
+      return await youtubeSearch(args.query);
+    }
+    case "freeMusicSearch": {
+      return await freeMusicSearch(args.query);
+    }
+    case "sendLegalFile": {
+      if (!env.TELEGRAM_BOT_TOKEN) return { error: "Token Telegram tidak tersedia." };
+      // Allowlist domain legal (CC/public domain). Di luar ini = tolak, tanpa kecuali.
+      const LEGAL_HOSTS = ["ccmixter.org", "upload.wikimedia.org"];
+      let hostname = "";
+      try {
+        hostname = new URL(args.fileUrl).hostname.toLowerCase();
+      } catch (_) {
+        return { error: "URL file tidak valid." };
+      }
+      const allowed = LEGAL_HOSTS.some(h => hostname === h || hostname.endsWith("." + h));
+      if (!allowed) {
+        return { error: `Domain ${hostname} tidak diizinkan. Hanya file dari sumber legal (ccmixter.org, upload.wikimedia.org) yang boleh dikirim full.` };
+      }
+      let kind = args.kind || "auto";
+      if (kind === "auto") {
+        const lower = args.fileUrl.toLowerCase();
+        kind = /\.(mp3|m4a|aac|ogg|wav|flac)(\?|#|$)/.test(lower) ? "audio"
+          : /\.(jpg|jpeg|png|webp|gif)(\?|#|$)/.test(lower) ? "image" : "audio";
+      }
+      if (kind === "image") {
+        return await sendTelegramPhoto(env.TELEGRAM_BOT_TOKEN, chatId, args.fileUrl, args.title || "");
+      }
+      return await sendTelegramAudio(env.TELEGRAM_BOT_TOKEN, chatId, args.fileUrl, args.performer || "", args.title || "", "");
     }
     case "sendPhoto": {
       if (!env.TELEGRAM_BOT_TOKEN) return { error: "Token Telegram tidak tersedia." };
