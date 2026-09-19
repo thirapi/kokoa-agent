@@ -55,7 +55,7 @@ export async function handleWebhook(request, env, ctx) {
       return new Response("OK", { status: 200 });
     }
 
-    // Jika pesan dari Grup / Supergroup, respon jika di-mention, di-reply, atau chat bertipe group
+    // Jika pesan dari Grup / Supergroup, respon jika di-mention, di-reply, atau command eksplisit (/skill)
     const isGroup = message.chat.type === "group" || message.chat.type === "supergroup";
     if (isGroup) {
       const text = message.text || message.caption || "";
@@ -64,7 +64,8 @@ export async function handleWebhook(request, env, ctx) {
         (e) => e.type === "mention" || e.type === "text_mention"
       );
       const isMentioned = text.toLowerCase().includes("@") || isReplyToBot || hasMentionEntity;
-      if (!isMentioned) {
+      const isExplicitCommand = text.trim().toLowerCase().startsWith("/skill");
+      if (!isMentioned && !isExplicitCommand) {
         return new Response("OK", { status: 200 });
       }
     }
@@ -75,8 +76,41 @@ export async function handleWebhook(request, env, ctx) {
       return new Response("OK", { status: 200 });
     }
 
-    const text = message.text || message.caption || "";
-    const normalizedText = text.trim().toLowerCase();
+    let text = message.text || message.caption || "";
+    let normalizedText = text.trim().toLowerCase();
+
+    // Command /skill <nama> [prompt]: paksa skill tertentu untuk pesan ini (+10 menit ke depan)
+    if (normalizedText.startsWith("/skill")) {
+      const { getSkill, setForcedSkill, SKILLS } = await import("../agent/skills.js");
+      const parts = text.trim().split(/\s+/);
+      const skillName = (parts[1] || "").toLowerCase();
+      const skill = getSkill(skillName);
+      if (!skill) {
+        const names = SKILLS.map(s => s.name).join(", ");
+        ctx.waitUntil(sendTelegramMessage(
+          env.TELEGRAM_BOT_TOKEN, chatId,
+          `skillnya ga ketemu bjir. yg ada: ${names}. contoh: /skill review-pr tolong review pr 42 di thirapi/tg-bot`
+        ));
+        await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
+        return new Response("OK", { status: 200 });
+      }
+      await setForcedSkill(env, chatId, skill.name);
+      const remainder = parts.slice(2).join(" ").trim();
+      if (!remainder) {
+        ctx.waitUntil((async () => {
+          await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
+          await sendTelegramMessage(
+            env.TELEGRAM_BOT_TOKEN, chatId,
+            `skill ${skill.name} aktif 10 menit ke depan wkwk. tinggal kirim aja maumu apa`
+          );
+        })());
+        return new Response("OK", { status: 200 });
+      }
+      if (message.text) message.text = remainder;
+      if (message.caption) message.caption = remainder;
+      text = remainder;
+      normalizedText = text.trim().toLowerCase();
+    }
 
     // Handle relay callback from Spaces via Telegram (when direct callback fails)
     if (text.startsWith("__CB__")) {

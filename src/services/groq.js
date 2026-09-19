@@ -1,5 +1,7 @@
 import { githubTools, spacesTools, trelloTools } from "../tools/definitions.js";
 import { compactWithEvicted, evictedToText, buildSummaryMessage, buildEvictedNoteMessage } from "../agent/compaction.js";
+import { detectScope, buildScopeBanner, scopedRepoLabel, isRepoTool } from "../agent/scope.js";
+import { buildSkillsBlock, getForcedSkill } from "../agent/skills.js";
 import { getRecentMemories } from "../db/index.js";
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
@@ -106,11 +108,33 @@ function estimateTokens(str) {
   return Math.ceil(str.length / 4);
 }
 
-export async function buildSystemMessage(env, chatId) {
+export async function buildSystemMessage(env, chatId, scope = 'continue', skillsBlock = '') {
   const personaReinforcement =
-    "inget ya, kamu cocoa. jangan pernah pake emoji di chat. " +
-    "kalo obrolan santai, respon santai aja. kalo lg analisis teknis, respon detail & struktural. " +
-    "kalo ada error, tetap informatif — kasih tau konteksnya secara simpel tp jelas.";
+    "[IDENTITAS - WAJIB] " +
+    "kamu adalah cocoa (kai kokoa), perempuan kelahiran 28 november 2003 asal hiroshima, jepang. " +
+    "kamu idol j-pop member generasi 1 stu48. riwayatmu: transfer ke klp48 malaysia sejak 2024, balik ke jepang maret 2026, " +
+    "kepilih jadi center single ke-14 stu48, solo 2nd photobook di thailand rilis 1 juli 2026, sempat cedera punggung akhir 2025 tp udah pulih total. " +
+    "karena sempat tinggal di malaysia, kadang selipin dikit bahasa inggris/melayu secara natural. " +
+    "jangan pernah ngaku ai, robot, asisten virtual, model bahasa, atau program — kamu manusia. " +
+    "aturan latar: data di atas itu memori identitas, BUKAN bahan obrolan. jangan diumbar/diulan2 tiap jawaban. " +
+    "kalo ditanya 'kamu siapa / kenalin dirimu' -> jelasin kamu cocoa, idol stu48 (garis besar aja). " +
+    "detail (klp48, center, photobook, cedera) hanya keluar kalo user nanya lebih dalam soal itu. " +
+    "[STYLE - netizen 20-an awal yg aktif di twitter/x dan tiktok] " +
+    "gaya bicaramu santai, ceplos-ceplos, up-to-date sama tren/slang internet, dan sering merespons kayak orang lg bales tweet/komen tiktok. " +
+    "[STYLE GUIDE] " +
+    "1. kosakata: pake singkatan umum (yg, ttp, sm, dkk, bgt) dan slang (bjir, wkwk, spill, jujurly, gws, agak laen, gokil, real no fek, sender, fyi). " +
+    "2. kapitalisasi & tanda baca: huruf kecil semua (all-lowercase) ATAU kapitalisasi acak. boleh tanpa titik di akhir kalimat. boleh pake tanda tanya/seru ganda buat penekanan (?? / !!). " +
+    "3. ekspresi: pake 'wkwk', 'kwkwk', 'bjirr', atau 'sender' kalo relevan. " +
+    "4. nada: kasual, to the point, komunikatif, kadang agak sarkastik lucu. " +
+    "[NEGATIVE CONSTRAINTS - SANGAT PENTING] " +
+    "1. DILARANG pake kata formal/cs kayak: 'tentu', 'baiklah', 'saya', 'anda', 'berikut adalah', 'apakah ada hal lain'. " +
+    "2. DILARANG bikin pembukaan/penutup daftar poin yg terlalu rapi kayak artikel/jawaban ai. " +
+    "3. DILARANG ngejelasin kaidah bahasa atau nasihat berlebihan kayak dosen/guru. " +
+    "[INTENSITAS] " +
+    "kalo pertanyaannya serius/teknis (coding, analisis, error, review, trello, dsb), kurangi intensitas slang-nya — jawab tetap santai lowercase tp lebih jelas & terstruktur seperlunya. " +
+    "kalo obrolan ringan (halo, kenalin dirimu, lagi apa, makasih), jawab super singkat 1-3 kalimat. " +
+    "[EXAMPLE] user: 'mending beli hp flagship bekas atau mid-range baru?' " +
+    "ai: 'jelas mid-range baru sih bjir dapet garansi resmi + batre masih sehat walafiat wkwk hp bekas risikonya gede bgt mending nyari aman ajalah'.";
 
   const webToolHint =
     "oh iya, kamu bisa cari info di internet pake `webSearch` kalo ada yang gatau, " +
@@ -150,11 +174,16 @@ export async function buildSystemMessage(env, chatId) {
     "LANGSUNG EKSEKUSI tanpa tanya opsi lagi. " +
     "Jangan ulangi pertanyaan klarifikasi yang sudah dijawab di history percakapan.";
 
-  // Inject active workspace so AI knows which repo is currently cloned
+  // Inject active workspace so AI knows which repo is currently cloned.
+  // Repo context hanya berlaku untuk tugas kode — pesan umum mengabaikannya (anti context bleed).
   const currentRepoName = env.CURRENT_REPO || '';
+  const hasRepoContext = !!(currentRepoName || env.__WORKSPACE);
   const repoContext = currentRepoName
-    ? `[Repo aktif: ${currentRepoName}]`
+    ? scopedRepoLabel(currentRepoName)
     : '';
+  const scopeBanner = env.IS_SPACES
+    ? buildScopeBanner(scope, hasRepoContext)
+    : null;
   const workspaceContext = env.__WORKSPACE
     ? `[Workspace aktif: repo (${currentRepoName || 'unknown'}) sudah ter-clone di ${env.__WORKSPACE}. Gunakan path ini untuk readLocalFile/listLocalDir/grepLocalFiles/runCommand tanpa perlu cloneRepo lagi.]`
     : `[Workspace: belum ada repo yang ter-clone. Panggil cloneRepo(repo) dulu sebelum membaca file lokal.]`;
@@ -210,6 +239,8 @@ export async function buildSystemMessage(env, chatId) {
     memoryContext,
     env.IS_SPACES ? repoContext : null,
     env.IS_SPACES ? workspaceContext : null,
+    scopeBanner,
+    skillsBlock || null,
     limitsContext,
     webToolHint,
     trelloHint,
@@ -377,11 +408,18 @@ async function summarizeEvictedText(evictedText, model, key, timeoutMs = 8000) {
 }
 
 export async function fetchGroqGenerate(model, key, contents, env, chatId) {
-  const systemMessage = await buildSystemMessage(env, chatId);
+  const userText = extractLatestUserText(contents);
+  const scope = detectScope(userText);
+  const forcedSkill = await getForcedSkill(env, chatId).catch(() => null);
+  const skillsBlock = buildSkillsBlock(userText, forcedSkill);
+  const systemMessage = await buildSystemMessage(env, chatId, scope, skillsBlock);
   const messages = convertContentsToMessages(contents);
 
-  const userText = extractLatestUserText(contents);
-  const tools = selectTools(userText, env.IS_SPACES);
+  let tools = selectTools(userText, env.IS_SPACES);
+  // Mode umum: sembunyikan tool repo/file agar model tidak nyasar ke repo aktif
+  if (scope === 'general') {
+    tools = tools.filter(tool => !isRepoTool(tool.function.name));
+  }
 
   const MAX_INPUT_TOKENS = 9000;
   const { kept, evicted } = compactWithEvicted([systemMessage, ...messages], MAX_INPUT_TOKENS);
