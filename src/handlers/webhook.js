@@ -6,6 +6,49 @@ import { checkGroqQuota } from "../services/groq.js";
 import { clearHistory, acquireChatLock, releaseChatLock } from "../db/index.js";
 import { logError, getRecentErrors } from "../utils/logger.js";
 
+// Identitas bot sendiri (untuk filter mention grup: hanya balas kalau BOT yang di-tag,
+// bukan saat user tag orang lain). Di-cache 7 hari di KV; bisa dioverride via BOT_USERNAME.
+async function getBotIdentity(env) {
+  if (env.BOT_USERNAME) {
+    return { username: String(env.BOT_USERNAME).replace(/^@/, "").toLowerCase(), id: null };
+  }
+  try {
+    const cached = await env.CHAT_HISTORY.get("bot_identity");
+    if (cached) return JSON.parse(cached);
+  } catch (_) {}
+  const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/getMe`, {
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`getMe HTTP ${res.status}`);
+  const data = await res.json();
+  const ident = {
+    username: (data.result?.username || "").toLowerCase(),
+    id: data.result?.id ?? null,
+  };
+  if (!ident.username) throw new Error("getMe tanpa username");
+  try {
+    await env.CHAT_HISTORY.put("bot_identity", JSON.stringify(ident), { expirationTtl: 7 * 24 * 3600 });
+  } catch (_) {}
+  return ident;
+}
+
+// Cek apakah pesan grup memang men-tag BOT (bukan orang lain).
+// Dipisah agar bisa di-unit-test.
+export function isBotMentioned(message, botIdent) {
+  const text = message.text || message.caption || "";
+  if (message.reply_to_message?.from?.is_bot) return true;
+  const entities = message.entities || message.caption_entities || [];
+  if (botIdent?.username) {
+    if (text.toLowerCase().includes("@" + botIdent.username)) return true;
+    if (botIdent.id && entities.some(e => e.type === "text_mention" && String(e.user?.id) === String(botIdent.id))) {
+      return true;
+    }
+    return false;
+  }
+  // Fallback longgar bila identitas bot tak diketahui
+  return text.includes("@") || entities.some(e => e.type === "mention" || e.type === "text_mention");
+}
+
 export async function handleWebhook(request, env, ctx) {
   if (request.method !== "POST") {
     return new Response("Method Not Allowed", { status: 405 });
@@ -64,15 +107,13 @@ export async function handleWebhook(request, env, ctx) {
       return new Response("OK", { status: 200 });
     }
 
-    // Jika pesan dari Grup / Supergroup, respon jika di-mention, di-reply, atau command eksplisit (/skill)
+    // Jika pesan dari Grup / Supergroup, respon jika BOT di-mention/di-reply, atau command eksplisit.
+    // Tag ke orang lain (misal @pacar) TIDAK boleh men-trigger bot.
     const isGroup = message.chat.type === "group" || message.chat.type === "supergroup";
     if (isGroup) {
       const text = message.text || message.caption || "";
-      const isReplyToBot = message.reply_to_message?.from?.is_bot;
-      const hasMentionEntity = (message.entities || message.caption_entities || []).some(
-        (e) => e.type === "mention" || e.type === "text_mention"
-      );
-      const isMentioned = text.toLowerCase().includes("@") || isReplyToBot || hasMentionEntity;
+      const botIdent = await getBotIdentity(env).catch(() => null);
+      const isMentioned = isBotMentioned(message, botIdent);
       const _lc = text.trim().toLowerCase();
       const isExplicitCommand = _lc.startsWith("/skill") || _lc === "/plan" || _lc === "/build";
       if (!isMentioned && !isExplicitCommand && !message.isCallback) {
