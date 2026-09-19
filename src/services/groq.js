@@ -1,5 +1,5 @@
 import { githubTools, spacesTools, trelloTools } from "../tools/definitions.js";
-import { compactMessages } from "../agent/compaction.js";
+import { compactWithEvicted, evictedToText, buildSummaryMessage, buildEvictedNoteMessage } from "../agent/compaction.js";
 import { getRecentMemories } from "../db/index.js";
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
@@ -345,6 +345,37 @@ export function convertGroqResponse(groqData) {
   };
 }
 
+async function summarizeEvictedText(evictedText, model, key, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: "Ringkas percakapan berikut dalam 5-8 poin pendek Bahasa Indonesia. Fokus pada fakta, keputusan, dan status tugas. Maksimal 300 kata." },
+          { role: "user", content: evictedText },
+        ],
+        temperature: 0.3,
+        max_tokens: 512,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.choices?.[0]?.message?.content?.trim() || null;
+  } catch (_) {
+    clearTimeout(timeoutId);
+    return null;
+  }
+}
+
 export async function fetchGroqGenerate(model, key, contents, env, chatId) {
   const systemMessage = await buildSystemMessage(env, chatId);
   const messages = convertContentsToMessages(contents);
@@ -353,7 +384,17 @@ export async function fetchGroqGenerate(model, key, contents, env, chatId) {
   const tools = selectTools(userText, env.IS_SPACES);
 
   const MAX_INPUT_TOKENS = 9000;
-  let convMessages = compactMessages([systemMessage, ...messages], MAX_INPUT_TOKENS);
+  const { kept, evicted } = compactWithEvicted([systemMessage, ...messages], MAX_INPUT_TOKENS);
+  let convMessages = kept;
+
+  // Summarizing compaction: ringkas pesan lama yang terbuang agar konteks tidak hilang total.
+  // Gagal/timeout -> fallback ke catatan pemotongan (perilaku lama).
+  if (evicted.length > 0) {
+    const summary = await summarizeEvictedText(evictedToText(evicted), model, key).catch(() => null);
+    const insertMsg = summary ? buildSummaryMessage(summary) : buildEvictedNoteMessage(evicted.length);
+    const sysCount = convMessages.filter(m => m.role === 'system').length;
+    convMessages.splice(sysCount, 0, insertMsg);
+  }
 
   const payload = {
     model,
