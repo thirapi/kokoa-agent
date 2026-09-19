@@ -277,6 +277,12 @@ const server = createServer(async (req, res) => {
               const richHtml = markdownToRichHtml(finalText);
               const r = await proxyTelegram("sendMessage", {
                 chat_id: Number(stringChatId), text: richHtml, parse_mode: "HTML",
+                reply_markup: {
+                  inline_keyboard: [[
+                    { text: "🔍 detailin", callback_data: "detailin" },
+                    { text: "➡️ lanjutin", callback_data: "lanjutkan" },
+                  ]],
+                },
               });
               return r?.ok === true;
             })() : false;

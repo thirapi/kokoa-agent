@@ -2,7 +2,8 @@ import { githubTools, spacesTools, trelloTools } from "../tools/definitions.js";
 
 const READ_ONLY_TOOLS = new Set([
   'listGitHubIssues', 'getPRDiff', 'getFileContent', 'listDirectoryContents', 'searchInFiles',
-  'checkWorkflowStatus', 'webSearch', 'webFetch', 'getTaskPlan', 'recall', 'recallAll',
+  'checkWorkflowStatus', 'webSearch', 'webFetch', 'imageSearch', 'songSearch',
+  'getTaskPlan', 'recall', 'recallAll',
   'getReminders', 'getTrelloBoard', 'getTrelloLists', 'readLocalFile', 'listLocalDir', 'grepLocalFiles'
 ]);
 

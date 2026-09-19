@@ -22,7 +22,8 @@ export async function handleWebhook(request, env, ctx) {
         chat: cb.message.chat,
         from: cb.from,
         text: cb.data,
-        message_id: cb.message.message_id
+        message_id: cb.message.message_id,
+        isCallback: true, // tombol inline = invokasi eksplisit, lewati filter mention grup
       };
       // Hilangkan spinner loading di tombol yang diklik (fire-and-forget)
       ctx.waitUntil(
@@ -74,7 +75,7 @@ export async function handleWebhook(request, env, ctx) {
       const isMentioned = text.toLowerCase().includes("@") || isReplyToBot || hasMentionEntity;
       const _lc = text.trim().toLowerCase();
       const isExplicitCommand = _lc.startsWith("/skill") || _lc === "/plan" || _lc === "/build";
-      if (!isMentioned && !isExplicitCommand) {
+      if (!isMentioned && !isExplicitCommand && !message.isCallback) {
         return new Response("OK", { status: 200 });
       }
     }

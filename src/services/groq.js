@@ -46,7 +46,7 @@ const ESSENTIAL_TOOLS = [
   'remember', 'recall', 'recallAll', 'forget',
   'setReminder', 'getReminders', 'deleteReminder',
   'createTaskPlan', 'getTaskPlan', 'updateTaskStatus', 'clearTaskPlan',
-  'webSearch', 'webFetch',
+  'webSearch', 'webFetch', 'imageSearch', 'songSearch', 'sendPhoto', 'sendAudio',
   'triggerDeveloperWorkflow', 'checkWorkflowStatus',
   'createTrelloCard', 'getTrelloBoard', 'getTrelloLists', 'createTrelloList',
   'addTrelloChecklist', 'addTrelloAttachment', 'moveTrelloCard', 'updateTrelloCard', 'createTrelloBoard',
@@ -143,7 +143,8 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
   const webToolHint =
     "oh iya, kamu bisa cari info di internet pake `webSearch` kalo ada yang gatau, " +
     "atau `webFetch` kalo mau baca halaman web. kalo pengguna nanya status workflow github, " +
-    "pake `checkWorkflowStatus`.";
+    "pake `checkWorkflowStatus`. kalo diminta cari gambar, pake `imageSearch` lalu kirim via `sendPhoto`. " +
+    "kalo diminta cari lagu, pake `songSearch` lalu kirim cuplikannya via `sendAudio` (previewUrl).";
 
   const spacesHint =
     "Kamu jalan di dedicated server dengan akses PENUH:\n" +

@@ -416,6 +416,74 @@ export const githubTools = [
         },
       },
       {
+        name: "imageSearch",
+        description: "Mencari gambar dari internet. Hasil berupa judul, URL halaman sumber, dan URL gambar langsung. Pakai kata kunci bahasa Inggris bila hasil kosong. Panggil sendPhoto setelahnya untuk mengirim gambar pilihan ke chat.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: {
+              type: "STRING",
+              description: "Kata kunci pencarian gambar.",
+            },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "songSearch",
+        description: "Mencari lagu (judul, penyanyi, album, preview audio 30 detik, cover). Panggil sendAudio dengan previewUrl untuk mengirim cuplikan lagu ke chat.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: {
+              type: "STRING",
+              description: "Judul lagu dan/atau nama penyanyi.",
+            },
+          },
+          required: ["query"],
+        },
+      },
+      {
+        name: "sendPhoto",
+        description: "Mengirim foto/gambar dari URL langsung ke chat Telegram saat ini. Pakai imageUrl dari hasil imageSearch atau artworkUrl dari songSearch.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            imageUrl: {
+              type: "STRING",
+              description: "URL langsung ke file gambar.",
+            },
+            caption: {
+              type: "STRING",
+              description: "Caption singkat untuk foto (opsional).",
+            },
+          },
+          required: ["imageUrl"],
+        },
+      },
+      {
+        name: "sendAudio",
+        description: "Mengirim audio ke chat Telegram saat ini. Pakai previewUrl dari hasil songSearch untuk mengirim cuplikan lagu 30 detik.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            audioUrl: {
+              type: "STRING",
+              description: "URL langsung ke file audio (misal previewUrl iTunes).",
+            },
+            performer: {
+              type: "STRING",
+              description: "Nama penyanyi/artis (opsional).",
+            },
+            title: {
+              type: "STRING",
+              description: "Judul lagu (opsional).",
+            },
+          },
+          required: ["audioUrl"],
+        },
+      },
+      {
         name: "createTaskPlan",
         description: "Membuat rencana tugas (task plan) dengan beberapa langkah. Gunakan ini ketika pengguna memberikan perintah kompleks yang butuh banyak langkah. Buat daftar langkah-langkahnya, eksekusi satu per satu, dan update status setiap langkah.",
         parameters: {

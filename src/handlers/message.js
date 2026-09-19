@@ -6,6 +6,7 @@ import { prepareMediaPart } from "../services/media.js";
 import {
   sendTelegramAction,
   sendTelegramMessage,
+  followUpKeyboard,
 } from "../services/telegram.js";
 import { executeTool } from "../tools/executor.js";
 import { runHarnessToolCall, isWriteTool } from "../tools/harness.js";
@@ -664,7 +665,7 @@ export async function processMessage(message, env) {
     } else if (result.finalText) {
       const richHtml = markdownToRichHtml(result.finalText);
       // sendTelegramMessage already handles splitting for messages > TG_MAX_MESSAGE_LENGTH
-      await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, richHtml);
+      await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, richHtml, followUpKeyboard());
 
       const newContent = currentContents.slice(history.length);
       if (newContent.length > 0) {

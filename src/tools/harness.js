@@ -6,7 +6,8 @@ const WRITE_TOOLS = new Set([
   'createPullRequest', 'mergePullRequest', 'updateIssueState', 'updatePRState',
   'addLabels', 'assignUser', 'remember', 'forget', 'createTaskPlan',
   'updateTaskStatus', 'clearTaskPlan', 'setReminder', 'deleteReminder',
-  'triggerDeveloperWorkflow', 'runCommand', 'executeCommand'
+  'triggerDeveloperWorkflow', 'runCommand', 'executeCommand',
+  'sendPhoto', 'sendAudio'
 ]);
 
 export function isWriteTool(toolName) {

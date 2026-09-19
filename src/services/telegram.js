@@ -62,6 +62,79 @@ export async function sendTelegramMessage(token, chatId, htmlText, replyMarkup =
   return sentMsgs;
 }
 
+export function followUpKeyboard() {
+  // callback_data dibuat super pendek (1 kata) agar terbaca sebagai lanjutan topik,
+  // bukan permintaan umum baru (lihat detectScope di src/agent/scope.js)
+  return {
+    inline_keyboard: [
+      [
+        { text: "🔍 detailin", callback_data: "detailin" },
+        { text: "➡️ lanjutin", callback_data: "lanjutkan" }
+      ]
+    ]
+  };
+}
+
+export async function sendTelegramPhoto(token, chatId, photoUrl, caption = "") {
+  const url = TG_API(token, "sendPhoto");
+  const payload = { chat_id: chatId, photo: photoUrl };
+  if (caption) {
+    payload.caption = caption.slice(0, 1000);
+    payload.parse_mode = "HTML";
+  }
+  let res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok && caption) {
+    delete payload.parse_mode;
+    payload.caption = stripHtml(caption).slice(0, 1000);
+    res = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`sendPhoto gagal (${res.status}): ${errText.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  return data.result || { ok: true };
+}
+
+export async function sendTelegramAudio(token, chatId, audioUrl, performer = "", title = "", caption = "") {
+  const url = TG_API(token, "sendAudio");
+  const payload = { chat_id: chatId, audio: audioUrl };
+  if (performer) payload.performer = performer.slice(0, 200);
+  if (title) payload.title = title.slice(0, 200);
+  if (caption) {
+    payload.caption = caption.slice(0, 1000);
+    payload.parse_mode = "HTML";
+  }
+  let res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }, 30000);
+  if (!res.ok && (caption || performer || title)) {
+    delete payload.parse_mode;
+    if (payload.caption) payload.caption = stripHtml(payload.caption).slice(0, 1000);
+    res = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }, 30000);
+  }
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`sendAudio gagal (${res.status}): ${errText.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  return data.result || { ok: true };
+}
+
 export async function editTelegramMessage(token, chatId, messageId, htmlText) {
   const url = TG_API(token, "editMessageText");
   const payload = {

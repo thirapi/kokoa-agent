@@ -1,6 +1,7 @@
 import { callGitHubAPI } from "../services/github.js";
 import { bufferToBase64 } from "../utils/array.js";
-import { webSearch, webFetch } from "../services/search.js";
+import { webSearch, webFetch, imageSearch, songSearch } from "../services/search.js";
+import { sendTelegramPhoto, sendTelegramAudio } from "../services/telegram.js";
 import {
   getTrelloBoard,
   getTrelloLists,
@@ -214,6 +215,20 @@ export async function executeTool(name, args, env, chatId) {
     }
     case "webFetch": {
       return await webFetch(args.url);
+    }
+    case "imageSearch": {
+      return await imageSearch(args.query);
+    }
+    case "songSearch": {
+      return await songSearch(args.query);
+    }
+    case "sendPhoto": {
+      if (!env.TELEGRAM_BOT_TOKEN) return { error: "Token Telegram tidak tersedia." };
+      return await sendTelegramPhoto(env.TELEGRAM_BOT_TOKEN, chatId, args.imageUrl, args.caption || "");
+    }
+    case "sendAudio": {
+      if (!env.TELEGRAM_BOT_TOKEN) return { error: "Token Telegram tidak tersedia." };
+      return await sendTelegramAudio(env.TELEGRAM_BOT_TOKEN, chatId, args.audioUrl, args.performer || "", args.title || "", args.caption || "");
     }
     case "createTaskPlan": {
       await clearTasks(env, chatId).catch(() => {});
