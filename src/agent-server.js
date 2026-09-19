@@ -55,10 +55,12 @@ function buildProxyEnv(envVars) {
     ...envVars,
     TELEGRAM_BOT_TOKEN: envVars.TELEGRAM_BOT_TOKEN || '',
     GEMINI_API_KEYS: envVars.GEMINI_API_KEYS || '',
-    GEMINI_MODELS: envVars.GEMINI_MODELS || 'gemini-3.1-flash-lite,gemini-3-flash-preview,gemini-3.5-flash',
+    GEMINI_MODELS: envVars.GEMINI_MODELS || 'gemini-3.5-flash,gemini-3.1-flash-lite,gemini-2.5-flash,gemini-3-flash-preview,gemini-3.1-pro-preview',
     GROQ_API_KEY: envVars.GROQ_API_KEY || '',
-    GROQ_MODELS: envVars.GROQ_MODELS || 'openai/gpt-oss-120b,openai/gpt-oss-20b,llama-3.3-70b-versatile,qwen/qwen3.6-27b',
-    AI_PROVIDERS: envVars.AI_PROVIDERS || 'gemini,groq',
+    GROQ_MODELS: envVars.GROQ_MODELS || 'openai/gpt-oss-20b,openai/gpt-oss-120b',
+    OPENROUTER_API_KEY: envVars.OPENROUTER_API_KEY || '',
+    OPENROUTER_MODELS: envVars.OPENROUTER_MODELS || 'openrouter/free,openai/gpt-oss-20b:free,openai/gpt-oss-120b:free',
+    AI_PROVIDERS: envVars.AI_PROVIDERS || 'gemini,groq,openrouter',
     GITHUB_PAT_TOKEN: envVars.GITHUB_PAT_TOKEN || '',
     GEMINI_SYSTEM_PERSONA: envVars.GEMINI_SYSTEM_PERSONA || '',
     GEMINI_SYSTEM_INSTRUCTION: envVars.GEMINI_SYSTEM_INSTRUCTION || '',
@@ -223,7 +225,7 @@ const server = createServer(async (req, res) => {
             }
           }
 
-          const providerConfigs = buildProviderConfigs(proxyEnv);
+          const providerConfigs = await buildProviderConfigs(proxyEnv);
           if (providerConfigs.length === 0) {
             throw new Error('No AI providers configured');
           }
@@ -265,7 +267,7 @@ const server = createServer(async (req, res) => {
           console.log(`[Spaces] Result stored for chat ${stringChatId}`);
 
           if (lastWorkerUrl) {
-            // Send response via proxy (fresh connection, no keepAlive)
+            // Send response via proxy
             const proxyOk = finalText ? await (async () => {
               const { markdownToRichHtml } = await import("./utils/formatter.js");
               const richHtml = markdownToRichHtml(finalText);
@@ -275,7 +277,40 @@ const server = createServer(async (req, res) => {
               return r?.ok === true;
             })() : false;
 
-            // Mark proxySent in stored result so short-poll doesn't re-send
+            // Sync new contents to Worker D1 Database via callback
+            if (newContent && newContent.length > 0) {
+              try {
+                const cbUrl = `${lastWorkerUrl}/api/spaces-callback`;
+                const cbBody = JSON.stringify({
+                  chatId: stringChatId,
+                  newContents: newContent,
+                  token: 'kokoa-runner-secret',
+                  isFinal: true
+                });
+                await new Promise((resolve) => {
+                  const u = new URL(cbUrl);
+                  const req = https.request({
+                    hostname: u.hostname,
+                    path: u.pathname,
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': 'Bearer kokoa-runner-secret',
+                      'Content-Length': Buffer.byteLength(cbBody)
+                    },
+                    timeout: 10000
+                  }, (res) => { res.resume(); resolve(); });
+                  req.on('error', resolve);
+                  req.on('timeout', () => { req.destroy(); resolve(); });
+                  req.write(cbBody);
+                  req.end();
+                });
+                console.log(`[Spaces] Synced new history to D1 for chat ${stringChatId}`);
+              } catch (e) {
+                console.error(`[Spaces] Failed sync to D1:`, e.message);
+              }
+            }
+
             if (proxyOk) {
               const existing = resultsStore.get(stringChatId);
               if (existing) { existing.proxySent = true; }

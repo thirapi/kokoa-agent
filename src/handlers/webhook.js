@@ -13,8 +13,18 @@ export async function handleWebhook(request, env, ctx) {
 
   try {
     const payload = await request.json();
-    const message = payload.message || payload.edited_message;
+    let message = payload.message || payload.edited_message;
     const updateId = payload.update_id;
+
+    if (payload.callback_query) {
+      const cb = payload.callback_query;
+      message = {
+        chat: cb.message.chat,
+        from: cb.from,
+        text: cb.data,
+        message_id: cb.message.message_id
+      };
+    }
 
     if (!message || !message.chat || !message.chat.id) {
       return new Response("OK", { status: 200 });
@@ -125,18 +135,24 @@ export async function handleWebhook(request, env, ctx) {
       return new Response("OK", { status: 200 });
     }
 
-    if (normalizedText === "/help") {
+    if (normalizedText === "/help" || normalizedText === "/menu") {
       ctx.waitUntil((async () => {
         await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
         const helpMsg =
-          "<b>bisa apa aja?</b>\n" +
-          "/start atau /reset - hapus memori biar kita mulai dr awal lagi\n" +
-          "/help - lihat daftar ini\n" +
-          "/unblock - reset kalo tiba-tiba macet\n" +
-          "/quota atau /keys - cek status koneksi\n" +
-          "/logs atau /debug - liat log error terbaru\n\n" +
-          "selain ngobrol, aku jg bisa bantu urusan github, cari info di internet, bikin pengingat, atau liat foto dan dengerin voice note kamu. tinggal bilang aja!";
-        await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, helpMsg);
+          "<b>Halo! Pilih menu cepat di bawah ini atau ketik langsung permintaanmu:</b>";
+        const inlineKeyboard = {
+          inline_keyboard: [
+            [
+              { text: "📊 Status Kuota", callback_data: "/quota" },
+              { text: "🔄 Reset Chat", callback_data: "/reset" }
+            ],
+            [
+              { text: "🔓 Unblock Cooldown", callback_data: "/unblock" },
+              { text: "🐞 Debug Logs", callback_data: "/logs" }
+            ]
+          ]
+        };
+        await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, helpMsg, inlineKeyboard);
       })());
       return new Response("OK", { status: 200 });
     }

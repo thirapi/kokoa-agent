@@ -20,16 +20,20 @@ export async function sendTelegramAction(token, chatId, action) {
   }, 5000);
 }
 
-export async function sendTelegramMessage(token, chatId, htmlText) {
+export async function sendTelegramMessage(token, chatId, htmlText, replyMarkup = null) {
   const url = TG_API(token, "sendMessage");
   const chunks = splitIntoChunks(htmlText, TG_MAX_MESSAGE_LENGTH);
   const sentMsgs = [];
-  for (const chunk of chunks) {
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
     const payload = {
       chat_id: chatId,
       text: chunk,
       parse_mode: "HTML",
     };
+    if (i === chunks.length - 1 && replyMarkup) {
+      payload.reply_markup = replyMarkup;
+    }
     const res = await fetchWithTimeout(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -37,10 +41,14 @@ export async function sendTelegramMessage(token, chatId, htmlText) {
     });
     if (!res.ok) {
       const plainText = stripHtml(chunk);
+      const fallbackPayload = { chat_id: chatId, text: plainText };
+      if (i === chunks.length - 1 && replyMarkup) {
+        fallbackPayload.reply_markup = replyMarkup;
+      }
       const fallbackRes = await fetchWithTimeout(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId, text: plainText }),
+        body: JSON.stringify(fallbackPayload),
       });
       if (fallbackRes.ok) {
         const data = await fallbackRes.json();

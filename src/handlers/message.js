@@ -1,6 +1,7 @@
 import { MAX_HISTORY, MAX_AGENT_ITERATIONS, EXECUTION_TIMEOUT, AGENT_ITERATION_TIMEOUT } from "../config.js";
 import { fetchGeminiGenerate } from "../services/gemini.js";
 import { fetchGroqGenerate } from "../services/groq.js";
+import { fetchOpenRouterGenerate } from "../services/openrouter.js";
 import { prepareMediaPart } from "../services/media.js";
 import {
   sendTelegramAction,
@@ -9,6 +10,7 @@ import {
 import { executeTool } from "../tools/executor.js";
 import { runHarnessToolCall, isWriteTool } from "../tools/harness.js";
 import { validateToolArgs } from "../agent/registry.js";
+import { getValidModelsForProvider } from "../agent/models-discovery.js";
 import { markdownToRichHtml } from "../utils/formatter.js";
 import { shuffleArray } from "../utils/array.js";
 import { logError } from "../utils/logger.js";
@@ -26,26 +28,51 @@ import {
 import { callGitHubAPI } from "../services/github.js";
 import { webSearch, webFetch } from "../services/search.js";
 
-export function buildProviderConfigs(env) {
+export async function buildProviderConfigs(env) {
   const configs = [];
 
   if (env.GEMINI_API_KEYS) {
+    const key = env.GEMINI_API_KEYS.split(",")[0].trim();
+    const models = await getValidModelsForProvider(
+      "gemini", key,
+      env.GEMINI_MODELS || "gemini-3.5-flash,gemini-3.1-flash-lite,gemini-2.5-flash,gemini-3-flash-preview,gemini-3.1-pro-preview",
+      env
+    );
     configs.push({
       name: "gemini",
       keys: env.GEMINI_API_KEYS.split(",").map((k) => k.trim()),
-      models: (env.GEMINI_MODELS || "gemini-3.1-flash-lite,gemini-3-flash-preview,gemini-3.5-flash")
-        .split(",").map((m) => m.trim()),
+      models,
       callAI: fetchGeminiGenerate,
     });
   }
 
   if (env.GROQ_API_KEY) {
+    const key = env.GROQ_API_KEY.split(",")[0].trim();
+    const models = await getValidModelsForProvider(
+      "groq", key,
+      env.GROQ_MODELS || "openai/gpt-oss-20b,openai/gpt-oss-120b",
+      env
+    );
     configs.push({
       name: "groq",
       keys: env.GROQ_API_KEY.split(",").map((k) => k.trim()),
-      models: (env.GROQ_MODELS || "openai/gpt-oss-120b,openai/gpt-oss-20b,llama-3.3-70b-versatile,qwen/qwen3.6-27b")
-        .split(",").map((m) => m.trim()),
+      models,
       callAI: fetchGroqGenerate,
+    });
+  }
+
+  if (env.OPENROUTER_API_KEY) {
+    const key = env.OPENROUTER_API_KEY.split(",")[0].trim();
+    const models = await getValidModelsForProvider(
+      "openrouter", key,
+      env.OPENROUTER_MODELS || "openrouter/free,openai/gpt-oss-20b:free,openai/gpt-oss-120b:free",
+      env
+    );
+    configs.push({
+      name: "openrouter",
+      keys: env.OPENROUTER_API_KEY.split(",").map((k) => k.trim()),
+      models,
+      callAI: fetchOpenRouterGenerate,
     });
   }
 
@@ -594,7 +621,7 @@ export async function processMessage(message, env) {
       }
     }
 
-    const providerConfigs = buildProviderConfigs(env);
+    const providerConfigs = await buildProviderConfigs(env);
     if (providerConfigs.length === 0) {
       throw new Error("gak ada provider AI yang aktif. cek konfigurasi API key kamu ya!");
     }
