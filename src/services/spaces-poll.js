@@ -1,7 +1,7 @@
 
 export async function handleSpacesResult(env, chatId, data, progressMsgId) {
   const { addHistory, trimHistory, removePendingSpace, releaseChatLock } = await import("../db/index.js");
-  const { sendTelegramMessage, deleteTelegramMessage } = await import("../services/telegram.js");
+  const { sendTelegramMessage, deleteTelegramMessage, sendTelegramPhoto, sendTelegramAudio } = await import("../services/telegram.js");
   const { markdownToRichHtml } = await import("../utils/formatter.js");
 
   console.log(`[SpacesResult] Result ready for chat ${chatId}`);
@@ -27,6 +27,24 @@ export async function handleSpacesResult(env, chatId, data, progressMsgId) {
     }
     console.log(`[SpacesResult] Step1: addHistory done for ${chatId}`);
   } catch (e) { console.error(`[SpacesResult] Step1 FAIL (addHistory):`, e.message); }
+
+  // Media yang gagal dikirim dari Spaces (egress HF diblokir untuk api.telegram.org)
+  // diantar dari sini (Worker -> Telegram). Dijamin sekali-kirim oleh mutex hdl: + removePendingSpace.
+  try {
+    const queued = Array.isArray(data.pendingMedia) ? data.pendingMedia.slice(0, 2) : [];
+    for (const m of queued) {
+      try {
+        if (m.kind === 'audio') {
+          await sendTelegramAudio(env.TELEGRAM_BOT_TOKEN, chatId, m.url, m.performer || "", m.title || "", m.caption || "");
+        } else {
+          await sendTelegramPhoto(env.TELEGRAM_BOT_TOKEN, chatId, m.url, m.caption || "");
+        }
+        console.log(`[SpacesResult] Delivered queued ${m.kind} for ${chatId}`);
+      } catch (e) {
+        console.error(`[SpacesResult] Queued ${m?.kind} delivery FAIL:`, e.message);
+      }
+    }
+  } catch (e) { console.error(`[SpacesResult] Queued media block FAIL:`, e.message); }
 
   // Skip sending if proxy already sent the message
   if (!data.proxySent) {

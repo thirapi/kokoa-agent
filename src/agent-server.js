@@ -48,7 +48,27 @@ function proxyTelegramDirect(method, body, timeoutMs = 45000) {
   });
 }
 
-export { isDirectNetworkError, proxyTelegramDirect };
+export { isDirectNetworkError, proxyTelegramDirect, hybridExecutor, queuePendingMedia, takePendingMedia };
+
+// Media yang gagal dikirim dari Spaces (egress putus) diantre di sini,
+// lalu dikirim dari sisi Worker oleh spaces-poll (jalur Worker -> Telegram terbukti hidup).
+// chatId -> array, maks 2 per sesi agar tidak spam bila model mencoba banyak URL.
+const pendingMediaStore = new Map();
+
+function queuePendingMedia(chatId, item) {
+  const key = String(chatId);
+  const arr = pendingMediaStore.get(key) || [];
+  if (arr.length >= 2) arr.shift();
+  arr.push(item);
+  pendingMediaStore.set(key, arr);
+}
+
+function takePendingMedia(chatId) {
+  const key = String(chatId);
+  const arr = pendingMediaStore.get(key) || [];
+  pendingMediaStore.delete(key);
+  return arr;
+}
 
 async function hybridExecutor(name, args, env, chatId) {
   if (isSpacesTool(name)) {
@@ -74,6 +94,17 @@ async function hybridExecutor(name, args, env, chatId) {
         return r.result || { ok: true, via: 'worker-proxy' };
       }
       console.log(`[Spaces] Worker proxy juga gagal untuk ${name}`);
+      // Antre untuk pengiriman dari sisi Worker (spaces-poll). Kembalikan pesan
+      // sukses-tertunda agar model memberi tahu user medianya menyusul, bukan error.
+      const item = name === 'sendPhoto'
+        ? { kind: 'photo', url: args.imageUrl, caption: args.caption || '' }
+        : { kind: 'audio', url: args.audioUrl, performer: args.performer || '', title: args.title || '', caption: args.caption || '' };
+      queuePendingMedia(chatId, item);
+      console.log(`[Spaces] ${name} antre untuk pengiriman via Worker`);
+      return {
+        queued: true,
+        message: 'Jaringan ke Telegram sedang putus, jadi file ini DIANTRE dan akan dikirim otomatis menyusul dari server (bukan olehmu). Beri tahu user dengan santai bahwa fotonya/audionya segera menyusul. JANGAN tempel URL di teks jawaban.',
+      };
     }
     throw e;
   }
@@ -147,6 +178,7 @@ async function finishSpacesResult(stringChatId, { finalText, newContent, escalat
     error: null,
     proxySent: false,
     historySynced: false,
+    pendingMedia: takePendingMedia(stringChatId),
     progressMsgId: progressMsgId || null,
     ts: Date.now(),
   };
@@ -449,6 +481,7 @@ const server = createServer(async (req, res) => {
             escalationTriggered: false,
             error: errorMsg,
             proxySent: false,
+            pendingMedia: takePendingMedia(stringChatId),
             progressMsgId: progressMsgId || null,
             ts: Date.now()
           };
@@ -608,7 +641,9 @@ const server = createServer(async (req, res) => {
           resultsStore.set(stringChatId, {
             status: 'complete', finalText: null, newContent: [],
             escalationTriggered: false, error: err.message,
-            proxySent: false, historySynced: false, progressMsgId: null, ts: Date.now(),
+            proxySent: false, historySynced: false,
+            pendingMedia: takePendingMedia(stringChatId),
+            progressMsgId: null, ts: Date.now(),
           });
         }
       })();
