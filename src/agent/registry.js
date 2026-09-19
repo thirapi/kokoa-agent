@@ -37,6 +37,12 @@ export function getToolsForMode(isSpaces = false, isPlanOnly = false) {
   return tools;
 }
 
+export function isReadOnlyTool(name) {
+  const meta = ALL_TOOLS_MAP.get(name);
+  if (!meta) return false; // tool tak dikenal = anggap berbahaya di mode plan
+  return meta.isReadOnly;
+}
+
 export function validateToolArgs(name, args) {
   const meta = ALL_TOOLS_MAP.get(name);
   if (!meta) return { valid: false, error: `Tool "${name}" tidak terdaftar.` };

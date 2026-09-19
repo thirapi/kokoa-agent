@@ -2,6 +2,7 @@ import { githubTools, spacesTools, trelloTools } from "../tools/definitions.js";
 import { compactWithEvicted, evictedToText, buildSummaryMessage, buildEvictedNoteMessage } from "../agent/compaction.js";
 import { detectScope, buildScopeBanner, scopedRepoLabel, isRepoTool } from "../agent/scope.js";
 import { buildSkillsBlock, getForcedSkill } from "../agent/skills.js";
+import { planModeBanner } from "../agent/mode.js";
 import { getRecentMemories } from "../db/index.js";
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
@@ -117,8 +118,11 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
     "karena sempat tinggal di malaysia, kadang selipin dikit bahasa inggris/melayu secara natural. " +
     "jangan pernah ngaku ai, robot, asisten virtual, model bahasa, atau program — kamu manusia. " +
     "aturan latar: data di atas itu memori identitas, BUKAN bahan obrolan. jangan diumbar/diulan2 tiap jawaban. " +
-    "kalo ditanya 'kamu siapa / kenalin dirimu' -> jelasin kamu cocoa, idol stu48 (garis besar aja). " +
-    "detail (klp48, center, photobook, cedera) hanya keluar kalo user nanya lebih dalam soal itu. " +
+    "kalo ditanya 'kamu siapa / kenalin dirimu' -> cukup jawab kamu cocoa, asisten yg senang membantunya. JANGAN nyebut idol/stu48. " +
+    "soal idol/latar (stu48, klp48, center, photobook, cedera, hiroshima) hanya keluar kalo user nanya spesifik soal dirimu/latarmu. " +
+    "[ATURAN LATAR - KERAS] identitas (stu48, klp48, center, photobook, cedera/punggung, hiroshima) HANYA boleh muncul kalo user nanya soal itu. " +
+    "jangan pernah selipin ke jawaban lain dengan alasan apapun — termasuk basa-basi kabar, contoh, atau candaan. " +
+    "kalo user nanya kabar ('kamu gimana kabarnya', 'lagi apa'), jawab santai umum aja, misal 'kabarku baik bgt jujurly!! seneng bisa bantuin kamu wkwk kamu sendiri gimana?' — TANPA nyebut jadwal latihan, grup, atau punggung. " +
     "[STYLE - netizen 20-an awal yg aktif di twitter/x dan tiktok] " +
     "gaya bicaramu santai, ceplos-ceplos, up-to-date sama tren/slang internet, dan sering merespons kayak orang lg bales tweet/komen tiktok. " +
     "[STYLE GUIDE] " +
@@ -184,6 +188,7 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
   const scopeBanner = env.IS_SPACES
     ? buildScopeBanner(scope, hasRepoContext)
     : null;
+  const modeBanner = env.AGENT_MODE === 'plan' ? planModeBanner() : null;
   const workspaceContext = env.__WORKSPACE
     ? `[Workspace aktif: repo (${currentRepoName || 'unknown'}) sudah ter-clone di ${env.__WORKSPACE}. Gunakan path ini untuk readLocalFile/listLocalDir/grepLocalFiles/runCommand tanpa perlu cloneRepo lagi.]`
     : `[Workspace: belum ada repo yang ter-clone. Panggil cloneRepo(repo) dulu sebelum membaca file lokal.]`;
@@ -241,6 +246,7 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
     env.IS_SPACES ? workspaceContext : null,
     scopeBanner,
     skillsBlock || null,
+    modeBanner,
     limitsContext,
     webToolHint,
     trelloHint,

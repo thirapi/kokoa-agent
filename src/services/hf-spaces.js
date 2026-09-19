@@ -1,4 +1,5 @@
 import { getHistory, getAllMemories, getTasks, addHistory, trimHistory, addPendingSpace } from "../db/index.js";
+import { resolveAgentMode } from "../agent/mode.js";
 import { sendTelegramMessage } from "./telegram.js";
 import { markdownToRichHtml } from "../utils/formatter.js";
 import { MAX_HISTORY } from "../config.js";
@@ -7,6 +8,8 @@ export async function processViaSpaces(env, chatId, userPrompt, mediaData, histo
   const maxHistory = MAX_HISTORY;
   const memories = await getAllMemories(env, chatId);
   const tasks = await getTasks(env, chatId);
+
+  const agentMode = await resolveAgentMode(env, chatId).catch(() => 'build');
 
   const userParts = [{ text: userPrompt }];
   if (mediaData) userParts.push(mediaData);
@@ -22,6 +25,7 @@ export async function processViaSpaces(env, chatId, userPrompt, mediaData, histo
       currentContents,
       memories,
       tasks,
+      mode: agentMode,
       workerUrl: env.WORKER_URL || "",
       progressMsgId: progressMsgId || null,
     }),

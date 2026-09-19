@@ -61,6 +61,7 @@ function buildProxyEnv(envVars) {
     OPENROUTER_API_KEY: envVars.OPENROUTER_API_KEY || '',
     OPENROUTER_MODELS: envVars.OPENROUTER_MODELS || 'openrouter/free,openai/gpt-oss-20b:free,openai/gpt-oss-120b:free',
     AI_PROVIDERS: envVars.AI_PROVIDERS || 'gemini,groq,openrouter',
+    AGENT_MODE: envVars.AGENT_MODE || 'build',
     GITHUB_PAT_TOKEN: envVars.GITHUB_PAT_TOKEN || '',
     GEMINI_SYSTEM_PERSONA: envVars.GEMINI_SYSTEM_PERSONA || '',
     GEMINI_SYSTEM_INSTRUCTION: envVars.GEMINI_SYSTEM_INSTRUCTION || '',
@@ -137,7 +138,7 @@ const server = createServer(async (req, res) => {
   if (url.pathname === '/api/process' && req.method === 'POST') {
     try {
       const body = await parseBody(req);
-      const { chatId, userPrompt, currentContents: rawContents, memories, tasks, workerUrl: reqWorkerUrl, progressMsgId } = body;
+      const { chatId, userPrompt, currentContents: rawContents, memories, tasks, mode, workerUrl: reqWorkerUrl, progressMsgId } = body;
 
       if (!chatId) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -163,6 +164,9 @@ const server = createServer(async (req, res) => {
         const proxyEnv = buildProxyEnv(process.env);
         if (lastWorkerUrl) {
           proxyEnv.WORKER_URL = lastWorkerUrl;
+        }
+        if (mode === 'plan' || mode === 'build') {
+          proxyEnv.AGENT_MODE = mode;
         }
 
         async function proxyTelegram(method, body) {

@@ -31,6 +31,8 @@ export async function processWebChatViaSend(env, message, mode = 'auto') {
 
 async function routeToSpaces(env, chatId, userPrompt, currentContents, history, memories, tasks) {
   try {
+    const { resolveAgentMode } = await import("../agent/mode.js");
+    const agentMode = await resolveAgentMode(env, chatId).catch(() => 'build');
     const response = await fetch(`${env.HF_SPACES_URL}/api/process`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -40,6 +42,7 @@ async function routeToSpaces(env, chatId, userPrompt, currentContents, history, 
         currentContents,
         memories,
         tasks,
+        mode: agentMode,
         workerUrl: env.WORKER_URL || '',
         progressMsgId: null,
       }),

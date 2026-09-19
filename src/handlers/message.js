@@ -9,7 +9,8 @@ import {
 } from "../services/telegram.js";
 import { executeTool } from "../tools/executor.js";
 import { runHarnessToolCall, isWriteTool } from "../tools/harness.js";
-import { validateToolArgs } from "../agent/registry.js";
+import { validateToolArgs, isReadOnlyTool } from "../agent/registry.js";
+import { resolveAgentMode } from "../agent/mode.js";
 import { getValidModelsForProvider } from "../agent/models-discovery.js";
 import { markdownToRichHtml } from "../utils/formatter.js";
 import { shuffleArray } from "../utils/array.js";
@@ -97,6 +98,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
   let selfReflectionRun = false;
   let filesModified = false;
   const isSpaces = !!env.IS_SPACES;
+  const agentMode = await resolveAgentMode(env, chatId).catch(() => 'build');
 
   // Throttle progress updates to avoid Telegram editMessageText rate limits
   let lastProgressTime = 0;
@@ -350,6 +352,11 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
           if (!validation.valid) {
             console.warn(`[Registry Validation Failed]: ${validation.error}`);
             return { error: validation.error };
+          }
+          // Mode plan: blokir tool tulis/eksekusi di level harness (bukan cuma prompt)
+          if (agentMode === 'plan' && !isReadOnlyTool(name)) {
+            console.warn(`[Plan Mode Blocked]: ${name}`);
+            return { error: `mode plan aktif, tool "${name}" diblokir karena read-only. ketik /build buat eksekusi.` };
           }
           console.log(`Executing Tool: ${name}`, args);
           if (isWriteTool(name)) {

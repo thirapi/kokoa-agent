@@ -24,6 +24,14 @@ export async function handleWebhook(request, env, ctx) {
         text: cb.data,
         message_id: cb.message.message_id
       };
+      // Hilangkan spinner loading di tombol yang diklik (fire-and-forget)
+      ctx.waitUntil(
+        fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ callback_query_id: cb.id }),
+        }).catch(() => {})
+      );
     }
 
     if (!message || !message.chat || !message.chat.id) {
@@ -64,7 +72,8 @@ export async function handleWebhook(request, env, ctx) {
         (e) => e.type === "mention" || e.type === "text_mention"
       );
       const isMentioned = text.toLowerCase().includes("@") || isReplyToBot || hasMentionEntity;
-      const isExplicitCommand = text.trim().toLowerCase().startsWith("/skill");
+      const _lc = text.trim().toLowerCase();
+      const isExplicitCommand = _lc.startsWith("/skill") || _lc === "/plan" || _lc === "/build";
       if (!isMentioned && !isExplicitCommand) {
         return new Response("OK", { status: 200 });
       }
@@ -110,6 +119,23 @@ export async function handleWebhook(request, env, ctx) {
       if (message.caption) message.caption = remainder;
       text = remainder;
       normalizedText = text.trim().toLowerCase();
+    }
+
+    // Command /plan (kunci read-only) / /build (buka full akses)
+    if (normalizedText === "/plan" || normalizedText === "/build") {
+      const mode = normalizedText === "/plan" ? "plan" : "build";
+      ctx.waitUntil((async () => {
+        const { setAgentMode } = await import("../agent/mode.js");
+        await setAgentMode(env, chatId, mode);
+        await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
+        await sendTelegramMessage(
+          env.TELEGRAM_BOT_TOKEN, chatId,
+          mode === "plan"
+            ? "mode plan aktif wkwk. aku cuma observasi + analisis dulu, ga akan utak-atik apa2. santai aja kirim maumu apa"
+            : "mode build aktif gass!! aku bisa eksekusi penuh lagi. mau kerjain apa?"
+        );
+      })());
+      return new Response("OK", { status: 200 });
     }
 
     // Handle relay callback from Spaces via Telegram (when direct callback fails)
@@ -181,8 +207,19 @@ export async function handleWebhook(request, env, ctx) {
               { text: "🔄 Reset Chat", callback_data: "/reset" }
             ],
             [
-              { text: "🔓 Unblock Cooldown", callback_data: "/unblock" },
+              { text: "📝 Mode Plan", callback_data: "/plan" },
+              { text: "🔨 Mode Build", callback_data: "/build" }
+            ],
+            [
+              { text: "🔍 Skill: Review PR", callback_data: "/skill review-pr" },
+              { text: "📋 Skill: Trello", callback_data: "/skill trello-triage" }
+            ],
+            [
+              { text: "🗺️ Skill: Repo Tour", callback_data: "/skill repo-tour" },
               { text: "🐞 Debug Logs", callback_data: "/logs" }
+            ],
+            [
+              { text: "🔓 Unblock Cooldown", callback_data: "/unblock" }
             ]
           ]
         };
