@@ -1,7 +1,7 @@
 
 export async function handleSpacesResult(env, chatId, data, progressMsgId) {
   const { addHistory, trimHistory, removePendingSpace, releaseChatLock } = await import("../db/index.js");
-  const { sendTelegramMessage, deleteTelegramMessage, followUpKeyboard } = await import("../services/telegram.js");
+  const { sendTelegramMessage, deleteTelegramMessage } = await import("../services/telegram.js");
   const { markdownToRichHtml } = await import("../utils/formatter.js");
 
   console.log(`[SpacesResult] Result ready for chat ${chatId}`);
@@ -36,7 +36,7 @@ export async function handleSpacesResult(env, chatId, data, progressMsgId) {
           "tugas ini butuh akses sistem yang lebih dalam. aku kerjakan di GitHub Actions ya...");
       } else if (data.finalText) {
         const richHtml = markdownToRichHtml(data.finalText);
-        await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, richHtml, followUpKeyboard());
+        await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, richHtml);
       } else if (data.error) {
         await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId,
           `yah eror pas jalanin di server: ${data.error}. coba kirim lagi ya!`);

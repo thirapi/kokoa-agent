@@ -82,19 +82,6 @@ export async function sendTelegramMessage(token, chatId, htmlText, replyMarkup =
   return sentMsgs;
 }
 
-export function followUpKeyboard() {
-  // callback_data dibuat super pendek (1 kata) agar terbaca sebagai lanjutan topik,
-  // bukan permintaan umum baru (lihat detectScope di src/agent/scope.js)
-  return {
-    inline_keyboard: [
-      [
-        { text: "🔍 detailin", callback_data: "detailin" },
-        { text: "➡️ lanjutin", callback_data: "lanjutkan" }
-      ]
-    ]
-  };
-}
-
 export async function sendTelegramPhoto(token, chatId, photoUrl, caption = "") {
   const url = TG_API(token, "sendPhoto");
   const payload = { chat_id: chatId, photo: photoUrl };

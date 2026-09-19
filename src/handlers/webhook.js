@@ -136,7 +136,6 @@ export async function handleWebhook(request, env, ctx) {
           );
           const { addHistory, trimHistory } = await import("../db/index.js");
           const { markdownToRichHtml } = await import("../utils/formatter.js");
-          const { followUpKeyboard } = await import("../services/telegram.js");
           const fullContents = result.contents || snap.contents;
           const newContent = fullContents.slice(snap.historyLen || 0);
           if (newContent.length > 0) {
@@ -150,7 +149,7 @@ export async function handleWebhook(request, env, ctx) {
           if (result.escalationTriggered) {
             await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "tugas ini butuh akses sistem yang lebih dalam. aku kerjakan di GitHub Actions ya...");
           } else if (result.finalText) {
-            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, markdownToRichHtml(result.finalText), followUpKeyboard());
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, markdownToRichHtml(result.finalText));
           } else {
             await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "tugasnya udah aku jalanin ya! tp aku ga dapet respons teks penutup dr sistem.");
           }

@@ -46,8 +46,33 @@ async function searchSearxng(query) {
   throw new Error("SearXNG all failed");
 }
 
+// Cek URL gambar masih hidup via HEAD (Telegram harus bisa download URL-nya).
+// 405/501 = server tidak suka HEAD tapi file biasanya ada -> anggap hidup.
+async function isImageAlive(url) {
+  try {
+    const res = await fetch(url, {
+      method: "HEAD",
+      headers: { "User-Agent": "TelegramBot/1.0 (Cocoa)" },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (res.ok) return true;
+    if (res.status === 405 || res.status === 501) return true;
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function keepAliveImages(results) {
+  const checks = await Promise.all(results.map(async (r) => ({
+    item: r,
+    alive: r.imageUrl ? await isImageAlive(r.imageUrl) : false,
+  })));
+  return checks.filter(c => c.alive).map(c => c.item);
+}
+
 async function imageSearchOpenverse(query) {
-  const url = `https://api.openverse.org/v1/images/?q=${encodeURIComponent(query)}&page_size=6&filter_dead=false`;
+  const url = `https://api.openverse.org/v1/images/?q=${encodeURIComponent(query)}&page_size=8&filter_dead=true`;
   const res = await fetch(url, {
     headers: { "User-Agent": "TelegramBot/1.0 (Cocoa)" },
     signal: AbortSignal.timeout(10000),
@@ -58,7 +83,9 @@ async function imageSearchOpenverse(query) {
     .filter(r => r.url)
     .map(r => ({ title: r.title || "", pageUrl: r.foreign_landing_url || "", imageUrl: r.url }));
   if (results.length === 0) throw new Error("Openverse kosong");
-  return results;
+  const alive = await keepAliveImages(results);
+  if (alive.length === 0) throw new Error("Openverse: semua URL gambar mati");
+  return alive.slice(0, 6);
 }
 
 export async function imageSearch(query) {
@@ -86,10 +113,12 @@ export async function imageSearch(query) {
       const data = await res.json();
       const results = (data.results || [])
         .filter(r => r.img_src)
-        .slice(0, 6)
+        .slice(0, 8)
         .map(r => ({ title: r.title || "", pageUrl: r.url || "", imageUrl: r.img_src }));
       if (results.length === 0) continue;
-      return results;
+      const alive = await keepAliveImages(results);
+      if (alive.length === 0) continue;
+      return alive.slice(0, 6);
     } catch (e) {
       errors.push(`${instance}: ${e.message}`);
     }

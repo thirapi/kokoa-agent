@@ -417,7 +417,7 @@ export const githubTools = [
       },
       {
         name: "imageSearch",
-        description: "Mencari gambar dari internet. Hasil berupa judul, URL halaman sumber, dan URL gambar langsung. Pakai kata kunci bahasa Inggris bila hasil kosong. Panggil sendPhoto setelahnya untuk mengirim gambar pilihan ke chat.",
+        description: "Mencari gambar dari internet. Hasil berupa judul, URL halaman sumber, dan URL gambar langsung (sudah dicek masih hidup). Pakai kata kunci bahasa Inggris bila hasil kosong. Panggil sendPhoto setelahnya untuk mengirim gambar pilihan ke chat, teruskan imageUrl APA ADANYA tanpa diketik ulang/diubah.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -514,7 +514,7 @@ export const githubTools = [
       },
       {
         name: "sendPhoto",
-        description: "Mengirim foto/gambar dari URL langsung ke chat Telegram saat ini. Pakai imageUrl dari hasil imageSearch atau artworkUrl dari songSearch.",
+        description: "Mengirim foto/gambar dari URL langsung ke chat Telegram saat ini. Pakai imageUrl dari hasil imageSearch atau artworkUrl dari songSearch. WAJIB lewat tool ini — JANGAN tulis/tempel URL gambar mentah di jawaban teks. Kalau tool ini gagal, JANGAN tempel URL-nya di teks — beri tahu user pengirimannya gagal dan tawarkan cari gambar lain.",
         parameters: {
           type: "OBJECT",
           properties: {

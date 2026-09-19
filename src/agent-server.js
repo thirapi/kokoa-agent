@@ -63,17 +63,11 @@ async function postWorkerJSON(path, obj, timeoutMs = 10000) {
   });
 }
 
-async function proxyFinalWithFollowUp(proxyTelegram, stringChatId, finalText) {
+async function proxyFinalText(proxyTelegram, stringChatId, finalText) {
   const { markdownToRichHtml } = await import("./utils/formatter.js");
   const richHtml = markdownToRichHtml(finalText);
   const r = await proxyTelegram("sendMessage", {
     chat_id: Number(stringChatId), text: richHtml, parse_mode: "HTML",
-    reply_markup: {
-      inline_keyboard: [[
-        { text: "🔍 detailin", callback_data: "detailin" },
-        { text: "➡️ lanjutin", callback_data: "lanjutkan" },
-      ]],
-    },
   });
   return r?.ok === true;
 }
@@ -94,7 +88,7 @@ async function finishSpacesResult(stringChatId, { finalText, newContent, escalat
   if (!lastWorkerUrl) return entry;
   if (finalText) {
     try {
-      if (await proxyFinalWithFollowUp(proxyTelegram, stringChatId, finalText)) entry.proxySent = true;
+      if (await proxyFinalText(proxyTelegram, stringChatId, finalText)) entry.proxySent = true;
     } catch (e) {
       console.error('[Spaces] proxy final failed:', e.message);
     }

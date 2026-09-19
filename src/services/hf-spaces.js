@@ -1,6 +1,6 @@
 import { getHistory, getAllMemories, getTasks, addHistory, trimHistory, addPendingSpace } from "../db/index.js";
 import { resolveAgentMode } from "../agent/mode.js";
-import { sendTelegramMessage, followUpKeyboard } from "./telegram.js";
+import { sendTelegramMessage } from "./telegram.js";
 import { markdownToRichHtml } from "../utils/formatter.js";
 import { MAX_HISTORY } from "../config.js";
 
@@ -68,7 +68,7 @@ export async function processViaSpaces(env, chatId, userPrompt, mediaData, histo
     // already saved above
   } else if (result.finalText) {
     const richHtml = markdownToRichHtml(result.finalText);
-    await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, richHtml, followUpKeyboard());
+    await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, richHtml);
   } else {
     console.warn("Spaces did not provide final text output.");
     await sendTelegramMessage(
