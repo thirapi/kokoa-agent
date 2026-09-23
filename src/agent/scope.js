@@ -12,6 +12,16 @@ const REPO_SIGNALS = [
   'build', 'lint', 'deploy', 'workflow', 'actions',
   'grep', 'diff', 'patch', 'npm', 'node', 'pip', 'docker',
   'trello', 'kanban', 'reminder', 'pengingat',
+  'init', 'inisialisasi',
+];
+
+// Pola eksplisit "owner/repo" (mis. thirapi/htmx) — sinyal repo paling kuat,
+// tapi hanya bila disertai kata konteks agar "dan/atau" atau "siang/malam"
+// di obrolan santai tidak ikut kena.
+const REPO_PATH_PATTERN = /\b[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+\b/;
+const REPO_PATH_CONTEXT = [
+  'repo', 'github', 'project', 'init', 'clone', 'push', 'commit',
+  'branch', 'deploy', 'code', 'coding', 'program', 'workflow', 'git', 'pr',
 ];
 
 // Sinyal bahwa pesan ini lanjutan dari tugas/percakapan sebelumnya
@@ -57,6 +67,9 @@ export function detectScope(latestText, historyTexts = []) {
   const text = (latestText || '').toLowerCase();
   if (!text.trim()) return 'continue';
   if (REPO_SIGNALS.some(k => text.includes(k))) return 'repo';
+  // "init project go +htmx di thirapi/htmx" tidak mengandung keyword repo
+  // sama sekali — tapi pola owner/repo + kata konteks = tugas repo.
+  if (REPO_PATH_PATTERN.test(text) && REPO_PATH_CONTEXT.some(k => text.includes(k))) return 'repo';
   const words = text.trim().split(/\s+/).length;
   // Pesan lanjutan/keluhan ("kok masih gak bisa", "coba lagi", "tetap error")
   // merujuk ke tugas sebelumnya — JANGAN dikira topik umum.
