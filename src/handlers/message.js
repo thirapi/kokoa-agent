@@ -52,7 +52,11 @@ export async function buildProviderConfigs(env) {
     });
   }
 
-  if (env.GROQ_API_KEY) {
+  // Groq DINONAKTIFKAN sementara (default): free tier on_demand hanya 8000 TPM
+  // org-wide, sementara SATU step agent loop butuh ~6000 token. Loop yang
+  // butuh 3-6 step beruntun dijamin 429 terus. Aktifkan lagi hanya setelah
+  // upgrade Dev Tier: set GROQ_ENABLED=true di env (Worker vars + Space secrets).
+  if ((env.GROQ_ENABLED || 'false').toLowerCase() === 'true' && env.GROQ_API_KEY) {
     const key = env.GROQ_API_KEY.split(",")[0].trim();
     const models = await getValidModelsForProvider(
       "groq", key,

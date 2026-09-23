@@ -566,10 +566,15 @@ export async function fetchGroqGenerate(model, key, contents, env, chatId) {
       const sysMsgs = convMessages.filter(m => m.role === 'system').slice(0, 1);
       const tail = convMessages.filter(m => m.role !== 'system').slice(-2);
       response = await sendOnce(buildPayload([...sysMsgs, ...tail]));
-      if (!response.ok) {
-        const retryData = await response.text();
-        throw new Error(`GROQ_PAYLOAD_TOO_LARGE: ${response.status} - ${retryData.slice(0, 300)}`);
-      }
+        if (!response.ok) {
+          const retryData = await response.text();
+          // 429 di sini = bucket TPM habis (rate limit), BUKAN payload kebesaran.
+          // Label harus tepat agar rotasi provider menanganinya sebagai rate limit.
+          if (response.status === 429) {
+            throw new Error(`GROQ_RATE_LIMIT: 429 - ${retryData.slice(0, 300)}`);
+          }
+          throw new Error(`GROQ_PAYLOAD_TOO_LARGE: ${response.status} - ${retryData.slice(0, 300)}`);
+        }
     } else {
       if (response.status === 429) {
         throw new Error(`GROQ_RATE_LIMIT: 429 - ${errorData}`);
