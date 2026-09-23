@@ -104,11 +104,35 @@ function stubBranchName(instruction) {
   return `kokoa/${words || 'task'}-${hash}`;
 }
 
+function buildAuthUrl(originUrl, pat) {
+  const encoded = encodeURIComponent(pat || '');
+  if (originUrl.includes('@github.com/')) {
+    return originUrl.replace(/https:\/\/[^@]+@github\.com\//, `https://x-access-token:${encoded}@github.com/`);
+  }
+  return originUrl.replace('https://github.com/', `https://x-access-token:${encoded}@github.com/`);
+}
+
 function remoteBranchExists(authUrl, branch) {
   try {
     const output = execSync(`git ls-remote --heads ${authUrl} ${branch}`, { encoding: 'utf8', stdio: 'pipe' });
     return output.trim().length > 0;
   } catch { return false; }
+}
+
+function assertWriteAccess(authUrl, repo) {
+  try {
+    execSync(`git ls-remote --heads ${authUrl} HEAD`, { encoding: 'utf8', stdio: 'pipe' });
+  } catch (e) {
+    const stderr = ((e.stderr || '') + (e.stdout || '')).toString();
+    if (/invalid username|authentication failed|403|permission/i.test(stderr)) {
+      throw new Error(
+        `Push access ditolak untuk repo ${repo}. GLOBAL_WORKER_PAT tidak valid / tidak punya akses write ke repo target. ` +
+        `Clone repo publik tetap bisa jalan anonim, tapi push butuh PAT dengan scope contents:write + pull-requests:write (classic: repo + workflow) dan akses ke ${repo}. ` +
+        `Cek Secrets GLOBAL_WORKER_PAT, expiry, dan akses repo-nya. Detail: ${stderr.trim().slice(0, 300)}`
+      );
+    }
+    throw e;
+  }
 }
 
 async function main() {
@@ -164,6 +188,11 @@ async function main() {
     execSync('git config user.name "ccocoa"');
     execSync('git config user.email "270871570+ccocoa@users.noreply.github.com"');
 
+    if (!isAnalysisMode) {
+      const originCheck = execSync('git config --get remote.origin.url', { encoding: 'utf8' }).trim();
+      assertWriteAccess(buildAuthUrl(originCheck, GLOBAL_WORKER_PAT), TARGET_REPO);
+    }
+
     function ensureDefaultGitignore() {
       const gitignorePath = '.gitignore';
       const defaults = [
@@ -179,7 +208,11 @@ async function main() {
         '.env',
         '.env.local',
         '.env.production',
-        '.env.development'
+        '.env.development',
+        'server',
+        '*.exe',
+        '*.out',
+        '*.test'
       ];
 
       let currentContent = '';
@@ -328,7 +361,7 @@ async function main() {
         : `feat: update\n\nCo-authored-by: thirapi <132630759+thirapi@users.noreply.github.com>`;
 
       const originUrl = execSync('git config --get remote.origin.url', { encoding: 'utf8' }).trim();
-      const authUrl = originUrl.replace('https://github.com/', `https://x-access-token:${GLOBAL_WORKER_PAT}@github.com/`);
+      const authUrl = buildAuthUrl(originUrl, GLOBAL_WORKER_PAT);
       const branchName = stubBranchName(safeInstruction);
 
       await workerCallback("memory", {

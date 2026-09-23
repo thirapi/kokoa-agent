@@ -611,6 +611,8 @@ ${gitDiff.substring(0, 10000) || "(tidak ada perbedaan/file baru)"}
 Analisis apakah seluruh file, konfigurasi, dan modifikasi yang diminta atau tersirat dalam instruksi pengguna telah diimplementasikan dengan benar.
 Khususnya, pastikan tidak ada file utama yang terlewat (misal: jika diminta membuat landing page React, pastikan file index.html atau App.jsx/App.tsx benar-benar dibuat dan diubah, bukan hanya file style/css saja).
 Pastikan juga konfigurasi eksternal (seperti GitHub Actions workflow jika diminta) sudah dibuat dengan lengkap.
+PENTING: Pembuatan branch, commit, push, dan Pull Request DILAKUKAN OTOMATIS oleh executor setelah agent selesai — BUKAN tugas agent. Jadi instruksi seperti "Create a Pull Request", "commit", atau "push" HARUS diabaikan dalam penilaian dan TIDAK boleh membuat isComplete=false.
+Abaikan juga file binary hasil build (seperti 'server', '*.exe', '*.out') — itu artefak verifikasi, bukan bagian tugas.
 
 Format keluaran kamu harus berupa JSON dengan skema berikut:
 {
