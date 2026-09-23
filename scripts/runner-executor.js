@@ -18,6 +18,22 @@ const {
 
 const isAnalysisMode = MODE === "analysis";
 
+// JANGAN PERNAH menyimpan/mengirim token mentah ke Worker/D1/Telegram.
+// Error git sering menyertakan remote URL berisi PAT — redact sebelum keluar.
+function redactSecrets(value) {
+  const redactStr = (s) =>
+    String(s)
+      .replace(/x-access-token:[^@\s"']+@/g, 'x-access-token:***@')
+      .replace(/gh[pousr]_[A-Za-z0-9_]+/g, '***')
+      .replace(/github_pat_[A-Za-z0-9_]+/g, '***');
+  if (typeof value === 'string') return redactStr(value);
+  try {
+    return JSON.parse(redactStr(JSON.stringify(value)));
+  } catch {
+    return value;
+  }
+}
+
 async function workerCallback(type, data) {
   if (!WORKER_URL) return;
   try {
@@ -27,7 +43,7 @@ async function workerCallback(type, data) {
         "Content-Type": "application/json",
         Authorization: "Bearer kokoa-runner-secret",
       },
-      body: JSON.stringify({ chat_id: CHAT_ID, type, data }),
+      body: JSON.stringify({ chat_id: CHAT_ID, type, data: redactSecrets(data) }),
     });
   } catch (e) {
     console.error("Worker callback error:", e.message);
