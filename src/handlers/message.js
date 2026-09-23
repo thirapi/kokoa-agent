@@ -42,7 +42,7 @@ export async function buildProviderConfigs(env) {
     const key = env.GEMINI_API_KEYS.split(",")[0].trim();
     const models = await getValidModelsForProvider(
       "gemini", key,
-      env.GEMINI_MODELS || "gemini-3.5-flash,gemini-3.1-flash-lite,gemini-2.5-flash,gemini-3-flash-preview,gemini-3.1-pro-preview",
+      env.GEMINI_MODELS || "gemini-3.6-flash,gemini-3.5-flash-lite,gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3-flash-preview",
       env
     );
     configs.push({

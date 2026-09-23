@@ -238,7 +238,7 @@ function buildProxyEnv(envVars) {
     ...envVars,
     TELEGRAM_BOT_TOKEN: envVars.TELEGRAM_BOT_TOKEN || '',
     GEMINI_API_KEYS: envVars.GEMINI_API_KEYS || '',
-    GEMINI_MODELS: envVars.GEMINI_MODELS || 'gemini-3.5-flash,gemini-3.1-flash-lite,gemini-2.5-flash,gemini-3-flash-preview,gemini-3.1-pro-preview',
+    GEMINI_MODELS: envVars.GEMINI_MODELS || 'gemini-3.6-flash,gemini-3.5-flash-lite,gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3-flash-preview',
     GROQ_API_KEY: envVars.GROQ_API_KEY || '',
     GROQ_MODELS: envVars.GROQ_MODELS || 'openai/gpt-oss-20b,openai/gpt-oss-120b',
     OPENROUTER_API_KEY: envVars.OPENROUTER_API_KEY || '',

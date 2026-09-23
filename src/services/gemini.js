@@ -268,7 +268,7 @@ export async function fetchGeminiGenerate(model, key, contents, env, chatId) {
 
 export async function checkGeminiQuota(env) {
   const keys = (env.GEMINI_API_KEYS || "").split(",").map((k) => k.trim()).filter(Boolean);
-  const models = (env.GEMINI_MODELS || "gemini-3.5-flash,gemini-3.1-flash-lite,gemini-2.5-flash,gemini-3-flash-preview,gemini-3.1-pro-preview")
+  const models = (env.GEMINI_MODELS || "gemini-3.6-flash,gemini-3.5-flash-lite,gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3-flash-preview")
     .split(",")
     .map((m) => m.trim())
     .filter(Boolean);

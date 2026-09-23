@@ -377,7 +377,7 @@ export class AgentSession {
     this.providers = [];
     
     const geminiKeys = (process.env.GEMINI_API_KEYS || "").split(",").map(k => k.trim()).filter(Boolean);
-    const geminiModels = (process.env.GEMINI_MODELS || "gemini-3.1-flash-lite,gemini-3-flash-preview,gemini-3.5-flash")
+    const geminiModels = (process.env.GEMINI_MODELS || "gemini-3.6-flash,gemini-3.5-flash-lite,gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3-flash-preview")
       .split(",").map(m => m.trim()).filter(Boolean);
 
     if (geminiKeys.length > 0) {

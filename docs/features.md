@@ -387,7 +387,7 @@ Berikut variabel konfigurasi di `wrangler.jsonc` atau dashboard Cloudflare yang 
 | Variabel | Deskripsi | Contoh Nilai |
 | :--- | :--- | :--- |
 | `GEMINI_API_KEYS` | Daftar API Key Gemini dari Google AI Studio (pisahkan dengan koma). | `AIzaSyA..., AIzaSyB...` |
-| `GEMINI_MODELS` | Daftar model Gemini yang digunakan untuk rotasi (pisahkan dengan koma). | `gemini-3.5-flash,gemini-3.1-flash-lite` |
+| `GEMINI_MODELS` | Daftar model Gemini yang digunakan untuk rotasi (pisahkan dengan koma). | `gemini-3.6-flash,gemini-3.5-flash-lite` |
 | `TELEGRAM_BOT_TOKEN` | Token Bot Telegram Anda dari @BotFather. | `123456789:ABCDefGh...` |
 | `ALLOWED_USER_ID` | Telegram User ID Anda agar bot hanya merespon Anda (keamanan). | `987654321` |
 | `GITHUB_PAT_TOKEN` | Personal Access Token GitHub dengan hak akses repositori yang sesuai. | `ghp_abc123...` |
