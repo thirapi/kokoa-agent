@@ -10,7 +10,7 @@ import {
 import { executeTool } from "../tools/executor.js";
 import { runHarnessToolCall, isWriteTool, modifiesRepoFiles } from "../tools/harness.js";
 import { validateToolArgs, isReadOnlyTool } from "../agent/registry.js";
-import { detectScope, extractLatestUserText, isRepoTool } from "../agent/scope.js";
+import { detectScope, extractLatestUserText, recentUserTexts, isRepoTool } from "../agent/scope.js";
 import { resolveAgentMode } from "../agent/mode.js";
 import {
   isHighRiskTool, toolCallKey, ApprovalPending,
@@ -107,7 +107,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
   // Scope pesan terakhir: 'general' = permintaan umum (bukan kode/repo).
   // Dipakai untuk hard-block tool repo di bawah (anti context-bleed).
   // 'continue' (pesan pendek spt "lanjutkan") TIDAK diblokir — itu lanjutan topik sebelumnya.
-  const loopScope = detectScope(userPrompt || extractLatestUserText(currentContents));
+  const loopScope = detectScope(userPrompt || extractLatestUserText(currentContents), recentUserTexts(currentContents, 4));
   const resume = options.resume || null;
   if (resume?.contents) {
     currentContents = resume.contents;

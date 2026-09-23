@@ -1,12 +1,12 @@
 import { buildSystemMessage, convertContentsToMessages, convertGroqResponse, selectTools } from "./groq.js";
-import { detectScope, isRepoTool, extractLatestUserText } from "../agent/scope.js";
+import { detectScope, isRepoTool, extractLatestUserText, recentUserTexts } from "../agent/scope.js";
 import { buildSkillsBlock, getForcedSkill } from "../agent/skills.js";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 export async function fetchOpenRouterGenerate(model, key, contents, env, chatId) {
   const latestText = extractLatestUserText(contents);
-  const scope = detectScope(latestText);
+  const scope = detectScope(latestText, recentUserTexts(contents, 4));
   const forcedSkill = await getForcedSkill(env, chatId).catch(() => null);
   const skillsBlock = buildSkillsBlock(latestText, forcedSkill);
   const systemMessage = await buildSystemMessage(env, chatId, scope, skillsBlock);

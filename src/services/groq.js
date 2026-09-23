@@ -1,6 +1,6 @@
 import { githubTools, spacesTools, trelloTools } from "../tools/definitions.js";
 import { compactWithEvicted, evictedToText, buildSummaryMessage, buildEvictedNoteMessage } from "../agent/compaction.js";
-import { detectScope, buildScopeBanner, scopedRepoLabel, isRepoTool } from "../agent/scope.js";
+import { detectScope, buildScopeBanner, scopedRepoLabel, isRepoTool, recentUserTexts } from "../agent/scope.js";
 import { buildSkillsBlock, getForcedSkill } from "../agent/skills.js";
 import { planModeBanner } from "../agent/mode.js";
 import { getRecentMemories } from "../db/index.js";
@@ -443,7 +443,7 @@ async function summarizeEvictedText(evictedText, model, key, timeoutMs = 8000) {
 
 export async function fetchGroqGenerate(model, key, contents, env, chatId) {
   const userText = extractLatestUserText(contents);
-  const scope = detectScope(userText);
+  const scope = detectScope(userText, recentUserTexts(contents, 4));
   const forcedSkill = await getForcedSkill(env, chatId).catch(() => null);
   const skillsBlock = buildSkillsBlock(userText, forcedSkill);
   const systemMessage = await buildSystemMessage(env, chatId, scope, skillsBlock);
