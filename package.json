@@ -1,5 +1,5 @@
 {
-  "name": "gemini-telegram-worker",
+  "name": "kokoa-agent",
   "version": "1.0.0",
   "description": "Telegram Bot integrated with Google Gemini API on Cloudflare Workers",
   "main": "src/index.js",

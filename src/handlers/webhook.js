@@ -215,7 +215,7 @@ export async function handleWebhook(request, env, ctx) {
         const names = SKILLS.map(s => s.name).join(", ");
         ctx.waitUntil(sendTelegramMessage(
           env.TELEGRAM_BOT_TOKEN, chatId,
-          `skillnya ga ketemu bjir. yg ada: ${names}. contoh: /skill review-pr tolong review pr 42 di thirapi/tg-bot`
+          `skillnya ga ketemu bjir. yg ada: ${names}. contoh: /skill review-pr tolong review pr 42 di thirapi/kokoa-agent`
         ));
         await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
         return new Response("OK", { status: 200 });

@@ -258,7 +258,7 @@ Dengan arsitektur **callback** (Spaces→Worker terjadi hanya saat ada pesan), j
 
 Perbedaan arsitektur:
 
-| Aspek | HuggingClaw | Kita (tg-bot) |
+| Aspek | HuggingClaw | Kita (kokoa-agent) |
 |-------|-------------|---------------|
 | **Arah komunikasi utama** | Space → Worker (Space initiate semua outbound via proxy) | Worker → Spaces (submit task), Spaces → Worker via proxy (response via telegram-proxy, callback simpan history) |
 | **Masalah utama** | Outbound HTTP dari Space diblokir HF | **Callback** dari Space ke Worker diblokir HF NAT |
@@ -403,7 +403,7 @@ Berikut variabel konfigurasi di `wrangler.jsonc` atau dashboard Cloudflare yang 
 ## 7. Struktur Direktori Proyek
 
 ```
-tg-bot/
+kokoa-agent/
 ├── src/
 │   ├── index.js                # Cloudflare Worker entry (fetch + scheduled/cron)
 │   ├── agent-server.js         # HF Spaces standalone HTTP server

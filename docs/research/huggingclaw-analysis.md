@@ -19,7 +19,7 @@ HF Space (OpenClaw)
 
 ### Perbedaan Fundamental dengan Arsitektur Kita
 
-| Aspek | HuggingClaw | Kita (tg-bot) |
+| Aspek | HuggingClaw | Kita (kokoa-agent) |
 |-------|-------------|---------------|
 | **Direction of communication** | Space → Worker (Space initiate semua outbound via proxy) | Worker → Spaces (submit task), Spaces → Worker (callback result) |
 | **Main challenge** | Outbound HTTP dari Space diblokir HF | **Callback** dari Space ke Worker diblokir HF NAT |
@@ -122,7 +122,7 @@ Terpisah dari proxy — menggunakan **Cloudflare Worker cron** yang ping `/healt
 
 ### 3d. Kesimpulan KeepAlive
 
-| Aspek | HuggingClaw | Kita (tg-bot) — SEBELUMNYA |
+| Aspek | HuggingClaw | Kita (kokoa-agent) — SEBELUMNYA |
 |-------|-------------|---------------------------|
 | **Untuk proxy connections** | **No keepAlive** — fresh connection tiap request | KeepAlive agent (+ heartbeat 5s) |
 | **Untuk Spaces container** | **External** Cloudflare cron (10 menit) | **Internal** heartbeat dari Spaces (5 detik) |
@@ -193,7 +193,7 @@ Keterangan:
 - **Tidak ada callback dari Space ke Worker** — Space selalu initiate
 - **Tidak ada keepAlive** — setiap request fresh connection
 
-**Kita (tg-bot):**
+**Kita (kokoa-agent):**
 ```
 Telegram → Cloudflare Worker (webhook)
               ↓

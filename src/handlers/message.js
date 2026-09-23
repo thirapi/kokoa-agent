@@ -500,7 +500,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
             await sendTelegramMessage(
               env.TELEGRAM_BOT_TOKEN,
               chatId,
-              `tugas ini butuh akses sistem yang lebih dalam. aku kerjakan di GitHub Actions ya...\n\nrepo: \`${escResult.repo || 'thirapi/tg-bot'}\`\n\nnanti hasilnya aku kabarin kalo udah selesai!`
+              `tugas ini butuh akses sistem yang lebih dalam. aku kerjakan di GitHub Actions ya...\n\nrepo: \`${escResult.repo || 'thirapi/kokoa-agent'}\`\n\nnanti hasilnya aku kabarin kalo udah selesai!`
             );
           }
         }
@@ -604,7 +604,7 @@ async function autoEscalate(env, chatId, currentContents, iteration, functionCal
   const dispatchBody = {
     event_type: 'kokoa-dev-task',
     client_payload: {
-      target_repo: repo || 'thirapi/tg-bot',
+      target_repo: repo || 'thirapi/kokoa-agent',
       instruction,
       mode: 'code',
       chat_id: chatId,
@@ -613,7 +613,7 @@ async function autoEscalate(env, chatId, currentContents, iteration, functionCal
     },
   };
 
-  const endpoint = 'repos/thirapi/tg-bot/dispatches';
+  const endpoint = 'repos/thirapi/kokoa-agent/dispatches';
   await callGitHubAPI(env, endpoint, 'POST', dispatchBody);
   return { contextId, repo, instruction };
 }

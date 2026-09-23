@@ -176,7 +176,7 @@ export async function executeTool(name, args, env, chatId) {
       return callGitHubAPI(env, endpoint);
     }
     case "triggerDeveloperWorkflow": {
-      const dispatchEndpoint = `repos/thirapi/tg-bot/dispatches`;
+      const dispatchEndpoint = `repos/thirapi/kokoa-agent/dispatches`;
       const mode = args.mode || "code";
       const body = {
         event_type: "kokoa-dev-task",

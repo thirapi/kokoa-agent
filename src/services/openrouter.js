@@ -30,7 +30,7 @@ export async function fetchOpenRouterGenerate(model, key, contents, env, chatId)
     headers: {
       "Authorization": `Bearer ${key}`,
       "Content-Type": "application/json",
-      "HTTP-Referer": "https://github.com/thirapi/tg-bot",
+      "HTTP-Referer": "https://github.com/thirapi/kokoa-agent",
       "X-Title": "Cocoa Agent"
     },
     body: JSON.stringify(payload)

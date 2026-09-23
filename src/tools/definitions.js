@@ -354,7 +354,7 @@ export const githubTools = [
           properties: {
             target_repo: {
               type: "STRING",
-              description: "Nama repositori target penuh (contoh: 'thirapi/62chan' atau 'thirapi/tg-bot').",
+              description: "Nama repositori target penuh (contoh: 'thirapi/62chan' atau 'thirapi/kokoa-agent').",
             },
             instruction: {
               type: "STRING",
@@ -843,7 +843,7 @@ export const spacesTools = [
         parameters: {
           type: "OBJECT",
           properties: {
-            repo: { type: "STRING", description: "Nama repo lengkap (contoh: 'thirapi/tg-bot')." },
+            repo: { type: "STRING", description: "Nama repo lengkap (contoh: 'thirapi/kokoa-agent')." },
             ref: { type: "STRING", description: "Branch/tag/commit (default: default branch)." },
           },
           required: ["repo"],
