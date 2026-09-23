@@ -328,7 +328,9 @@ async function callGroqAPI(model, key, messages, tools, systemInstruction) {
       ...messages
     ],
     temperature: 0.1,
-    max_tokens: 8192
+    // Groq free tier menagih max_tokens yang dideklarasikan (TPM 8000).
+    // 8192 = auto-413. Agent loop hanya butuh thought + tool call.
+    max_tokens: 2048
   };
   if (tools && tools.length > 0) {
     payload.tools = tools;

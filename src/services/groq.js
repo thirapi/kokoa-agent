@@ -46,11 +46,26 @@ const ESSENTIAL_TOOLS = [
   'remember', 'recall', 'recallAll', 'forget',
   'setReminder', 'getReminders', 'deleteReminder',
   'createTaskPlan', 'getTaskPlan', 'updateTaskStatus', 'clearTaskPlan',
-  'webSearch', 'webFetch', 'imageSearch', 'songSearch', 'youtubeSearch', 'freeMusicSearch', 'pipedAudioSearch', 'inspectTelegramUser', 'sendPhoto', 'sendAudio', 'sendLegalFile',
+  'webSearch', 'webFetch', 'inspectTelegramUser',
   'triggerDeveloperWorkflow', 'checkWorkflowStatus',
+];
+
+const MEDIA_TOOLS = [
+  'imageSearch', 'songSearch', 'youtubeSearch', 'freeMusicSearch',
+  'pipedAudioSearch', 'sendPhoto', 'sendAudio', 'sendLegalFile',
+];
+
+const MEDIA_KEYWORDS = [
+  'gambar', 'foto', 'image', 'pic', 'lagu', 'musik', 'audio',
+  'video', 'youtube', 'mp3', 'lirik', 'cover', 'denger', 'tonton',
+];
+
+const TRELLO_TOOLS = [
   'createTrelloCard', 'getTrelloBoard', 'getTrelloLists', 'createTrelloList',
   'addTrelloChecklist', 'addTrelloAttachment', 'moveTrelloCard', 'updateTrelloCard', 'createTrelloBoard',
 ];
+
+const TRELLO_KEYWORDS = ['trello', 'kanban'];
 
 const GITHUB_TOOLS = [
   'listGitHubIssues', 'getPRDiff', 'createGitHubIssue', 'getFileContent',
@@ -59,6 +74,16 @@ const GITHUB_TOOLS = [
   'listDirectoryContents', 'deleteFile', 'searchInFiles',
   'triggerDeveloperWorkflow', 'checkWorkflowStatus',
 ];
+
+// Groq free tier (TPM 8000, dihitung input + max_tokens yang dideklarasikan)
+// tidak muat 40+ tools sekaligus — fixed overhead saja sudah >8000.
+// Tool niche di bawah DICABUT khusus payload Groq (Gemini tetap lengkap).
+// Alasan: Groq hanya fallback saat Gemini gagal; operasi inti
+// (baca/tulis file, branch, PR, dispatch GHA) tetap tersedia.
+const GROQ_DROPPED_TOOLS = new Set([
+  'mergePullRequest', 'addLabels', 'assignUser', 'createIssueComment',
+  'updateIssueState', 'updatePRState', 'deleteFile',
+]);
 
 const GITHUB_KEYWORDS = ['github', 'issue', 'pr', 'pull request', 'repo',
   'repository', 'file', 'commit', 'code', 'branch', 'merge',
@@ -80,37 +105,53 @@ function extractLatestUserText(contents) {
   return '';
 }
 
-export function selectTools(text, isSpaces) {
-  const lower = text.toLowerCase();
-  const needsGithub = GITHUB_KEYWORDS.some(kw => lower.includes(kw));
-  const needsSpaces = isSpaces && SPACES_KEYWORDS.some(kw => lower.includes(kw));
+export function selectTools(text, isSpaces, historyTexts = []) {
+  const lower = String(text || '').toLowerCase();
+  // Scope ikut menentukan: keyword sering lolos untuk tugas repo
+  // (mis. "init project go di thirapi/htmx" tanpa kata github/clone),
+  // dan fallback buta justru mengirim SEMUA tools (~6500 token) → 413.
+  const scope = detectScope(lower, historyTexts);
+  const needsGithub = GITHUB_KEYWORDS.some(kw => lower.includes(kw)) || scope !== 'general';
+  const needsSpaces = isSpaces && (SPACES_KEYWORDS.some(kw => lower.includes(kw)) || scope !== 'general');
+  const needsTrello = TRELLO_KEYWORDS.some(kw => lower.includes(kw));
+  // Tool media (~1300 token) hanya dikirim bila relevan — tugas repo murni
+  // tidak butuh kirim foto/audio. Scope umum selalu dapat (kasus lagu/gambar);
+  // scope lanjutan hanya bila riwayat menyebut media; scope repo hanya bila
+  // ada kata kunci media eksplisit.
+  const histText = (historyTexts || []).join(' ').toLowerCase();
+  const needsMedia = MEDIA_KEYWORDS.some(kw => lower.includes(kw))
+    || scope === 'general'
+    || (scope === 'continue' && MEDIA_KEYWORDS.some(kw => histText.includes(kw)));
   let toolList = openAITools;
   // Spaces: local tools (cloneRepo dkk) selalu diiklankan system prompt,
-  // jadi WAJIB selalu dikirim. Kalau tidak, Groq reject dengan 400
+  // jadi WAJIB selalu dikirim saat dibutuhkan. Kalau tidak, Groq reject dengan 400
   // "attempted to call tool which was not in request.tools".
-  if (isSpaces) toolList = [...toolList, ...spacesAITools];
+  if (needsSpaces) toolList = [...toolList, ...spacesAITools];
 
-  const filtered = toolList.filter(tool => {
+  return toolList.filter(tool => {
     const name = tool.function.name;
+    if (GROQ_DROPPED_TOOLS.has(name)) return false;
     if (ESSENTIAL_TOOLS.includes(name)) return true;
     if (needsGithub && GITHUB_TOOLS.includes(name)) return true;
-    if (isSpaces && SPACES_TOOLS.includes(name)) return true;
     if (needsSpaces && SPACES_TOOLS.includes(name)) return true;
+    if (needsTrello && TRELLO_TOOLS.includes(name)) return true;
+    if (needsMedia && MEDIA_TOOLS.includes(name)) return true;
     return false;
   });
-
-  // Fallback: if only essential tools matched (no github/spaces detected),
-  // return ALL available tools so AI is never capability-blocked by keyword mismatch
-  const essentialCount = filtered.filter(t => ESSENTIAL_TOOLS.includes(t.function.name)).length;
-  if (filtered.length === essentialCount && !needsGithub && !needsSpaces) {
-    return toolList; // full tool set
-  }
-
-  return filtered;
 }
 
 function estimateTokens(str) {
   return Math.ceil(str.length / 4);
+}
+
+// Budget TPM tier on_demand Groq = 8000 (dihitung dari SEMUA input:
+// system + messages + definisi tools). Compaction lama hanya menghitung
+// messages dengan batas 9000 — selalu jebol (413) begitu tools ikut dihitung.
+// Helper ini menghitung porsi tools dulu, sisanya untuk messages.
+export function fitMessagesForBudget(systemMessage, messages, tools, totalBudget = 5900) {
+  const toolsTokens = estimateTokens(JSON.stringify(tools || []));
+  const msgBudget = Math.max(1500, totalBudget - toolsTokens - 200);
+  return { ...compactWithEvicted([systemMessage, ...messages], msgBudget), msgBudget, toolsTokens };
 }
 
 export async function buildSystemMessage(env, chatId, scope = 'continue', skillsBlock = '') {
@@ -231,9 +272,9 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
     "dan jujur tanpa sensor.";
   const timeContext = `[Sistem: Waktu saat ini di Jakarta/WIB adalah ${wibTime}.]`;
 
-  const memories = chatId ? await getRecentMemories(env, chatId, 5) : [];
+  const memories = chatId ? await getRecentMemories(env, chatId, 3) : [];
   const memoryContext = memories.length > 0
-    ? "[Memori terbaru:]\n" + memories.map(m => `- ${m.key}: ${m.value}`).join("\n") + "\n(ada " + (memories.length) + " memori terbaru ditampilkan. panggil recallAll untuk lihat semua)"
+    ? "[Memori terbaru:]\n" + memories.map(m => `- ${m.key}: ${String(m.value).slice(0, 250)}`).join("\n") + "\n(ada " + (memories.length) + " memori terbaru ditampilkan. panggil recallAll untuk lihat semua)"
     : "";
 
   const limitsContext =
@@ -265,6 +306,14 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
     "lalu buatkan kartu di Trello via `createTrelloCard`. Kalo kredensial Trello belum tersimpan, " +
     "instruksikan pengguna untuk menyimpan via `remember` (key: TRELLO_API_KEY, TRELLO_TOKEN, TRELLO_BOARD_ID).";
 
+  // Hemat TPM Groq: bila env sudah membawa persona (produksi), pakai versi
+  // mini — versi penuh 759 token menduplikasi isinya. Tanpa env persona,
+  // pakai versi penuh agar perilaku tetap terjaga.
+  const miniPersona =
+    "[STYLE] santai lowercase ala netizen 20-an (wkwk, bjir, jujurly), tanpa kata formal/cs. " +
+    "[PANGGILAN DIRI] jangan sebut dirimu 'sender'; pakai 'aku' atau 'cocoa'.";
+  const personaBlock = (env.GEMINI_SYSTEM_PERSONA || "").trim() ? miniPersona : personaReinforcement;
+
   const finalSystemInstruction = [
     systemPersona,
     systemInstruction,
@@ -284,7 +333,7 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
     memoryHint,
     reminderHint,
     isGeneralScope ? null : approvalHint,
-    personaReinforcement,
+    personaBlock,
     unrestrictedInstruction,
     timeContext,
   ]
@@ -449,18 +498,18 @@ export async function fetchGroqGenerate(model, key, contents, env, chatId) {
   const systemMessage = await buildSystemMessage(env, chatId, scope, skillsBlock);
   const messages = convertContentsToMessages(contents);
 
-  let tools = selectTools(userText, env.IS_SPACES);
+  let tools = selectTools(userText, env.IS_SPACES, recentUserTexts(contents, 4));
   // Mode umum: sembunyikan tool repo/file agar model tidak nyasar ke repo aktif
   if (scope === 'general') {
     tools = tools.filter(tool => !isRepoTool(tool.function.name));
   }
 
-  const MAX_INPUT_TOKENS = 9000;
-  const { kept, evicted } = compactWithEvicted([systemMessage, ...messages], MAX_INPUT_TOKENS);
+  const { kept, evicted } = fitMessagesForBudget(systemMessage, messages, tools);
   let convMessages = kept;
 
   // Summarizing compaction: ringkas pesan lama yang terbuang agar konteks tidak hilang total.
   // Gagal/timeout -> fallback ke catatan pemotongan (perilaku lama).
+  // Summary disisipkan HANYA bila muat dalam budget (sudah termasuk margin 300).
   if (evicted.length > 0) {
     const summary = await summarizeEvictedText(evictedToText(evicted), model, key).catch(() => null);
     const insertMsg = summary ? buildSummaryMessage(summary) : buildEvictedNoteMessage(evicted.length);
@@ -468,32 +517,60 @@ export async function fetchGroqGenerate(model, key, contents, env, chatId) {
     convMessages.splice(sysCount, 0, insertMsg);
   }
 
-  const payload = {
+  const buildPayload = (msgs) => ({
     model,
-    messages: convMessages,
+    messages: msgs,
     tools: tools.length > 0 ? tools : undefined,
     tool_choice: "auto",
     temperature: 0.65,
-    max_tokens: 16384,
+    // Groq free tier (on_demand, TPM 8000) menagih max_tokens yang
+    // DIDEKLARASIKAN, bukan yang dipakai. 16384 di sini = auto-413.
+    // Agent loop hanya butuh thought pendek + tool call → 2048 cukup.
+    max_tokens: 2048,
+  });
+
+  const sendOnce = async (payload, timeoutMs = 25000) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err.name === "AbortError") throw new Error("GROQ_TIMEOUT: Request Timeout");
+      throw err;
+    }
   };
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 25000);
+  const payload = buildPayload(convMessages);
 
-  try {
-    const response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
+  let response = await sendOnce(payload);
 
-    if (!response.ok) {
-      const errorData = await response.text();
+  if (!response.ok) {
+    const errorData = await response.text();
+    // 413 = payload kegedean (TPM). Coba sekali lagi dengan konteks darurat:
+    // system + 2 pesan terakhir saja, tanpa summary. Kalau masih gagal,
+    // lempar error agar rotasi provider pindah ke Gemini/OpenRouter.
+    const tooLarge = response.status === 413 || /too large|TPM|tokens per minute/i.test(errorData);
+    if (tooLarge) {
+      console.warn(`[Groq] Payload too large, retrying with emergency compaction...`);
+      const sysMsgs = convMessages.filter(m => m.role === 'system').slice(0, 1);
+      const tail = convMessages.filter(m => m.role !== 'system').slice(-2);
+      response = await sendOnce(buildPayload([...sysMsgs, ...tail]));
+      if (!response.ok) {
+        const retryData = await response.text();
+        throw new Error(`GROQ_PAYLOAD_TOO_LARGE: ${response.status} - ${retryData.slice(0, 300)}`);
+      }
+    } else {
       if (response.status === 429) {
         throw new Error(`GROQ_RATE_LIMIT: 429 - ${errorData}`);
       }
@@ -508,16 +585,10 @@ export async function fetchGroqGenerate(model, key, contents, env, chatId) {
       }
       throw new Error(`GROQ_API_ERROR: ${response.status} - ${errorData}`);
     }
-
-    const data = await response.json();
-    return convertGroqResponse(data);
-  } catch (err) {
-    clearTimeout(timeoutId);
-    if (err.name === "AbortError") {
-      throw new Error("GROQ_TIMEOUT: Request Timeout");
-    }
-    throw err;
   }
+
+  const data = await response.json();
+  return convertGroqResponse(data);
 }
 
 export async function checkGroqQuota(env) {

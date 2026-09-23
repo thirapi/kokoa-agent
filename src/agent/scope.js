@@ -78,7 +78,9 @@ export function detectScope(latestText, historyTexts = []) {
   if (CONTINUE_SIGNALS.some(k => text.includes(k))) {
     const prevRepo = (historyTexts || []).slice(-3)
       .some(t => REPO_SIGNALS.some(k => String(t || '').toLowerCase().includes(k)));
-    if (prevRepo || words <= 6) return 'continue';
+    // Lanjutan tanpa riwayat repo = topik umum (hemat token, anti-bleed).
+    // Pengecualian historis (pesan ≤3 kata) tetap dianggap lanjutan.
+    if (prevRepo || words <= 3) return 'continue';
   }
   // Pesan super pendek (oke, lanjut, dst) kemungkinan lanjutan topik sebelumnya
   if (words <= 3) return 'continue';

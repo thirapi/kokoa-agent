@@ -1,4 +1,4 @@
-import { buildSystemMessage, convertContentsToMessages, convertGroqResponse, selectTools } from "./groq.js";
+import { buildSystemMessage, convertContentsToMessages, convertGroqResponse, selectTools, fitMessagesForBudget } from "./groq.js";
 import { detectScope, isRepoTool, extractLatestUserText, recentUserTexts } from "../agent/scope.js";
 import { buildSkillsBlock, getForcedSkill } from "../agent/skills.js";
 
@@ -12,15 +12,17 @@ export async function fetchOpenRouterGenerate(model, key, contents, env, chatId)
   const systemMessage = await buildSystemMessage(env, chatId, scope, skillsBlock);
   const messages = convertContentsToMessages(contents);
   const userText = contents.filter(c => c.role === 'user').flatMap(c => c.parts.map(p => p.text || '')).join(' ');
-  let tools = selectTools(userText, env.IS_SPACES);
+  let tools = selectTools(userText, env.IS_SPACES, recentUserTexts(contents, 4));
   // Mode umum: sembunyikan tool repo/file agar model tidak nyasar ke repo aktif
   if (scope === 'general') {
     tools = tools.filter(tool => !isRepoTool(tool.function.name));
   }
+  // Batasi payload seperti Groq agar tidak jebol limit TPM Efektif.
+  const { kept } = fitMessagesForBudget(systemMessage, messages, tools);
 
   const payload = {
     model,
-    messages: [systemMessage, ...messages],
+    messages: kept,
     tools: tools.length > 0 ? tools : undefined,
     temperature: 0.7,
   };
