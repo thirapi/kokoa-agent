@@ -1,6 +1,7 @@
 import { githubTools, spacesTools, trelloTools } from "../tools/definitions.js";
 import { getRecentMemories } from "../db/index.js";
 import { detectScope, buildScopeBanner, scopedRepoLabel, isRepoTool, recentUserTexts } from "../agent/scope.js";
+import { withNetworkRetry } from "../utils/net.js";
 import { buildSkillsBlock, getForcedSkill } from "../agent/skills.js";
 import { planModeBanner } from "../agent/mode.js";
 
@@ -229,12 +230,14 @@ export async function fetchGeminiGenerate(model, key, contents, env, chatId) {
   const timeoutId = setTimeout(() => controller.abort(), 25000);
 
   try {
-    const response = await fetch(url, {
+    // NAT HF kadang me-RST TLS di percobaan pertama — retry cepat di sini
+    // (satu controller 25s untuk semua percobaan, jadi total tetap bounded).
+    const response = await withNetworkRetry(() => fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
       signal: controller.signal,
-    });
+    }));
     clearTimeout(timeoutId);
 
     if (!response.ok) {

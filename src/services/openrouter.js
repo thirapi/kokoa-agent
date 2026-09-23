@@ -1,5 +1,6 @@
 import { buildSystemMessage, convertContentsToMessages, convertGroqResponse, selectTools, fitMessagesForBudget } from "./groq.js";
 import { detectScope, isRepoTool, extractLatestUserText, recentUserTexts } from "../agent/scope.js";
+import { withNetworkRetry } from "../utils/net.js";
 import { buildSkillsBlock, getForcedSkill } from "../agent/skills.js";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -27,16 +28,18 @@ export async function fetchOpenRouterGenerate(model, key, contents, env, chatId)
     temperature: 0.7,
   };
 
-  const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+
+  const response = await withNetworkRetry(() => fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${key}`,
       "Content-Type": "application/json",
-      "HTTP-Referer": "https://github.com/thirapi/kokoa-agent",
-      "X-Title": "Cocoa Agent"
     },
-    body: JSON.stringify(payload)
-  });
+    body: JSON.stringify(payload),
+    signal: controller.signal,
+  })).finally(() => clearTimeout(timeoutId));
 
   if (!response.ok) {
     const errorData = await response.text();

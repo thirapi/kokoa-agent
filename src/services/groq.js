@@ -1,5 +1,6 @@
 import { githubTools, spacesTools, trelloTools } from "../tools/definitions.js";
 import { compactWithEvicted, evictedToText, buildSummaryMessage, buildEvictedNoteMessage } from "../agent/compaction.js";
+import { withNetworkRetry } from "../utils/net.js";
 import { detectScope, buildScopeBanner, scopedRepoLabel, isRepoTool, recentUserTexts } from "../agent/scope.js";
 import { buildSkillsBlock, getForcedSkill } from "../agent/skills.js";
 import { planModeBanner } from "../agent/mode.js";
@@ -533,7 +534,7 @@ export async function fetchGroqGenerate(model, key, contents, env, chatId) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
+      const response = await withNetworkRetry(() => fetch(`${GROQ_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${key}`,
@@ -541,7 +542,7 @@ export async function fetchGroqGenerate(model, key, contents, env, chatId) {
         },
         body: JSON.stringify(payload),
         signal: controller.signal,
-      });
+      }));
       clearTimeout(timeoutId);
       return response;
     } catch (err) {

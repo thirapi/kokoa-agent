@@ -17,6 +17,7 @@ import {
   saveApproval, stripMediaForSnapshot, approvalButtons, approvalPromptText,
 } from "../agent/approval.js";
 import { getValidModelsForProvider } from "../agent/models-discovery.js";
+import { isTransientNetworkError } from "../utils/net.js";
 import { markdownToRichHtml } from "../utils/formatter.js";
 import { shuffleArray } from "../utils/array.js";
 import { logError } from "../utils/logger.js";
@@ -299,6 +300,15 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
             }
 
             const errMsg = err.message;
+
+            // Jaringan transient (NAT HF me-RST TLS) = BUKAN salah key/model.
+            // Jangan blacklist/cooldown (itu menghukum key sehat 60 detik);
+            // langsung coba key berikutnya. Retry 3x di fetch sudah gagal
+            // semua sebelum sampai sini.
+            if (isTransientNetworkError(errMsg)) {
+              console.warn(`[${name}] transient network, failover cepat tanpa cooldown`);
+              continue;
+            }
 
             if (errMsg.includes("503") || errMsg.includes("UNAVAILABLE") || errMsg.includes("SERVICE_UNAVAILABLE")) {
               blacklistedModels.add(model);
