@@ -22,11 +22,18 @@ async function executeSpacesTool(name, args, env, chatId) {
     case "cloneRepo": {
       // Repo private butuh token (set GITHUB_PAT_TOKEN di secrets HF Space).
       // Tanpa token, clone repo private gagal dengan "could not read Username".
+      // Toleransi: model kadang mengirim {owner, repo} terpisah — gabungkan.
+      const repoFull = args.repo && String(args.repo).includes("/")
+        ? String(args.repo)
+        : (args.owner && args.repo ? `${args.owner}/${args.repo}` : args.repo);
+      if (!repoFull || !String(repoFull).includes("/")) {
+        throw new Error(`cloneRepo butuh parameter repo format 'owner/repo', dapat: ${JSON.stringify(args)}`);
+      }
       const gitToken = env.GITHUB_PAT_TOKEN || "";
       const repoUrl = gitToken
-        ? `https://x-access-token:${gitToken}@github.com/${args.repo}.git`
-        : `https://github.com/${args.repo}.git`;
-      const dirName = args.repo.replace(/[^a-zA-Z0-9_-]/g, "-");
+        ? `https://x-access-token:${gitToken}@github.com/${repoFull}.git`
+        : `https://github.com/${repoFull}.git`;
+      const dirName = repoFull.replace(/[^a-zA-Z0-9_-]/g, "-");
       const targetDir = `/tmp/tg-bot/repos/${dirName}`;
       try {
         execSync(
@@ -37,14 +44,14 @@ async function executeSpacesTool(name, args, env, chatId) {
         // JANGAN bocorkan token ke chat/history: ganti dengan placeholder sebelum dilempar.
         let safe = String(e.message || e);
         if (gitToken) safe = safe.split(gitToken).join("***");
-        throw new Error(safe || `gagal clone ${args.repo}`);
+        throw new Error(safe || `gagal clone ${repoFull}`);
       }
       env.__WORKSPACE = targetDir;
-      const repoParts = args.repo.split("/");
+      const repoParts = repoFull.split("/");
       if (repoParts.length === 2) {
-        env.CURRENT_REPO = args.repo;
+        env.CURRENT_REPO = repoFull;
       }
-      return { workspace: targetDir, message: `Repo ${args.repo} berhasil di-clone ke ${targetDir}` };
+      return { workspace: targetDir, message: `Repo ${repoFull} berhasil di-clone ke ${targetDir}` };
     }
     case "readLocalFile": {
       const filePath = resolvePath(args.path, env.__WORKSPACE);

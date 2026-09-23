@@ -85,12 +85,16 @@ export function selectTools(text, isSpaces) {
   const needsGithub = GITHUB_KEYWORDS.some(kw => lower.includes(kw));
   const needsSpaces = isSpaces && SPACES_KEYWORDS.some(kw => lower.includes(kw));
   let toolList = openAITools;
-  if (needsSpaces) toolList = [...toolList, ...spacesAITools];
+  // Spaces: local tools (cloneRepo dkk) selalu diiklankan system prompt,
+  // jadi WAJIB selalu dikirim. Kalau tidak, Groq reject dengan 400
+  // "attempted to call tool which was not in request.tools".
+  if (isSpaces) toolList = [...toolList, ...spacesAITools];
 
   const filtered = toolList.filter(tool => {
     const name = tool.function.name;
     if (ESSENTIAL_TOOLS.includes(name)) return true;
     if (needsGithub && GITHUB_TOOLS.includes(name)) return true;
+    if (isSpaces && SPACES_TOOLS.includes(name)) return true;
     if (needsSpaces && SPACES_TOOLS.includes(name)) return true;
     return false;
   });

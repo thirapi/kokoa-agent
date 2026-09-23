@@ -839,7 +839,7 @@ export const spacesTools = [
     functionDeclarations: [
       {
         name: "cloneRepo",
-        description: "Clone GitHub repo ke filesystem lokal server. Cepet buat baca banyak file tanpa panggil GitHub API tiap kali.",
+        description: "Clone GitHub repo ke filesystem lokal server. Cepet buat baca banyak file tanpa panggil GitHub API tiap kali. PENTING: parameter repo berupa SATU string 'owner/repo' (contoh: repo='thirapi/htmx'). JANGAN pecah menjadi owner dan repo terpisah.",
         parameters: {
           type: "OBJECT",
           properties: {
