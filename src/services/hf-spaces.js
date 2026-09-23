@@ -75,10 +75,11 @@ export async function processViaSpaces(env, chatId, userPrompt, mediaData, histo
     await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, richHtml);
   } else {
     console.warn("Spaces did not provide final text output.");
+    const { noFinalTextMessage } = await import("../utils/net.js");
     await sendTelegramMessage(
       env.TELEGRAM_BOT_TOKEN,
       chatId,
-      "tugasnya udah aku jalanin ya! tp aku ga dapet respons teks penutup dr sistem. coba cek repo kamu deh, harusnya kodenya udh ke-update",
+      noFinalTextMessage(result),
     );
   }
 

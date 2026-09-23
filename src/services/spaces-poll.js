@@ -59,8 +59,9 @@ export async function handleSpacesResult(env, chatId, data, progressMsgId) {
         await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId,
           `yah eror pas jalanin di server: ${data.error}. coba kirim lagi ya!`);
       } else {
+        const { noFinalTextMessage } = await import("../utils/net.js");
         await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId,
-          "tugasnya udah aku jalanin ya! tp aku ga dapet respons teks penutup dr sistem. coba cek repo kamu deh, harusnya kodenya udh ke-update");
+          noFinalTextMessage(data));
       }
       console.log(`[SpacesResult] Step2: sendTelegram done for ${chatId}`);
     } catch (e) { console.error(`[SpacesResult] Step2 FAIL (sendTelegram):`, e.message); }

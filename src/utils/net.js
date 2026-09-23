@@ -34,3 +34,17 @@ export async function withNetworkRetry(fn, { attempts = 3, backoffMs = [2000, 50
   }
   throw lastErr;
 }
+
+// Teks pengganti JUJUR saat loop selesai tanpa teks penutup dari model.
+// Versi lama ("tugasnya udah aku jalanin... harusnya kodenya udh ke-update")
+// berbohong di dua arah: kadang tidak ada yang dikerjakan, kadang ada.
+// Tiga status eksplisit berdasarkan filesModified dari runAgentLoop.
+export function noFinalTextMessage(result = {}) {
+  if (result.filesModified === true) {
+    return "perubahan file udah aku lakuin, tapi teks penutupnya ga keluar dari sistem. coba cek repo/workspace kamu — harusnya udah ke-update. kalo ada yang kurang, tinggal bilang aja!";
+  }
+  if (result.filesModified === false) {
+    return "loop-nya selesai tapi ga ada file yang berubah dan teks penutupnya ga keluar. coba jelasin lagi maumu apa, atau kirim ulang perintahnya ya!";
+  }
+  return "loop-nya selesai tapi teks penutupnya ga keluar dari sistem. coba cek dulu hasilnya, kalo ga sesuai bilang aja maumu apa!";
+}

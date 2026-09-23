@@ -139,7 +139,7 @@ export async function handleWebhook(request, env, ctx) {
         const { loadApproval, deleteApproval } = await import("../agent/approval.js");
         const approval = await loadApproval(env, approvalId);
         if (!approval || approval.status !== "pending" || !approval.snapshot) {
-          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "approval-nya udah kedaluwarsa wkwk. kirim ulang aja perintahnya");
+          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "approval-nya udah kedaluwarsa wkwk (berlaku 1 jam). kirim ulang aja perintahnya");
           return;
         }
         const acquired = await acquireChatLock(env, chatId);
@@ -192,7 +192,8 @@ export async function handleWebhook(request, env, ctx) {
           } else if (result.finalText) {
             await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, markdownToRichHtml(result.finalText));
           } else {
-            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "tugasnya udah aku jalanin ya! tp aku ga dapet respons teks penutup dr sistem.");
+            const { noFinalTextMessage } = await import("../utils/net.js");
+            await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, noFinalTextMessage(result));
           }
         } catch (e) {
           console.error("[Approval] Resume failed:", e);

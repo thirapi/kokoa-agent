@@ -133,8 +133,23 @@ setInterval(() => {
 }, 60000);
 let lastWorkerUrl = null;
 
-async function postWorkerJSON(path, obj, timeoutMs = 10000) {
+async function postWorkerJSON(path, obj, timeoutMs = 10000, attempts = 1) {
   if (!lastWorkerUrl) throw new Error('WORKER_URL belum tersedia');
+  let lastErr = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await postWorkerJSONOnce(path, obj, timeoutMs);
+    } catch (e) {
+      lastErr = e;
+      // 4xx = salah request/auth, retry tidak membantu. 5xx/network/timeout = coba lagi.
+      if (/Worker 4\d\d/.test(e.message)) throw e;
+      if (i < attempts - 1) await new Promise(r => setTimeout(r, 2000 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
+function postWorkerJSONOnce(path, obj, timeoutMs) {
   const bodyStr = JSON.stringify(obj);
   return new Promise((resolve, reject) => {
     const u = new URL(path, lastWorkerUrl);
@@ -169,12 +184,13 @@ async function proxyFinalText(proxyTelegram, stringChatId, finalText) {
   return r?.ok === true;
 }
 
-async function finishSpacesResult(stringChatId, { finalText, newContent, escalationTriggered, progressMsgId }, proxyTelegram) {
+async function finishSpacesResult(stringChatId, { finalText, newContent, escalationTriggered, progressMsgId, filesModified }, proxyTelegram) {
   const entry = {
     status: 'complete',
     finalText,
     newContent,
     escalationTriggered: !!escalationTriggered,
+    filesModified: filesModified ?? null,
     error: null,
     proxySent: false,
     historySynced: false,
@@ -430,7 +446,7 @@ const server = createServer(async (req, res) => {
               executionTimeout: 240000, iterationTimeout: 30000, toolExecutor: hybridExecutor,
               runtime: 'spaces',
               saveSnapshot: async (id, snap) => {
-                await postWorkerJSON('/api/approval-store', { id, snapshot: snap });
+                await postWorkerJSON('/api/approval-store', { id, snapshot: snap }, 10000, 3);
               },
               notifyApproval: async ({ id, tool, toolArgs }) => {
                 await proxyTelegram('sendMessage', {
@@ -456,13 +472,14 @@ const server = createServer(async (req, res) => {
           console.log(`[Spaces] originalHistoryLength=${originalHistoryLength} curLen=${currentContents.length} newLen=${newContent.length} roles=${newContent.map(c=>c.role).join(',')}`);
           let finalText = null;
           if (!result.escalationTriggered) {
-            finalText = result.finalText || "tugasnya udah aku jalanin ya! tp aku ga dapet respons teks penutup dr sistem. coba cek repo kamu deh, harusnya kodenya udh ke-update";
+            finalText = result.finalText || null;
           }
 
           await finishSpacesResult(stringChatId, {
             finalText, newContent,
             escalationTriggered: result.escalationTriggered,
             progressMsgId,
+            filesModified: result.filesModified,
           }, proxyTelegram);
           console.log(`[Spaces] Result stored for chat ${stringChatId}`);
 
@@ -600,7 +617,7 @@ const server = createServer(async (req, res) => {
               executionTimeout: 240000, iterationTimeout: 30000, toolExecutor: hybridExecutor,
               runtime: 'spaces', resume,
               saveSnapshot: async (id, snap) => {
-                await postWorkerJSON('/api/approval-store', { id, snapshot: snap });
+                await postWorkerJSON('/api/approval-store', { id, snapshot: snap }, 10000, 3);
               },
               notifyApproval: async ({ id, tool, toolArgs }) => {
                 await proxyTelegram2('sendMessage', {
@@ -623,12 +640,13 @@ const server = createServer(async (req, res) => {
           const newContent = fullContents.slice(snapshot.historyLen || 0).filter(c => !c._selfReflection);
           let finalText = null;
           if (!result.escalationTriggered) {
-            finalText = result.finalText || "tugasnya udah aku jalanin ya! tp aku ga dapet respons teks penutup dr sistem. coba cek repo kamu deh, harusnya kodenya udh ke-update";
+            finalText = result.finalText || null;
           }
           await finishSpacesResult(stringChatId, {
             finalText, newContent,
             escalationTriggered: result.escalationTriggered,
             progressMsgId: null,
+            filesModified: result.filesModified,
           }, proxyTelegram2);
           console.log(`[Spaces] Resume completed for chat ${stringChatId}`);
         } catch (err) {

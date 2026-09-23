@@ -320,7 +320,7 @@ export async function handleAPI(request, env, ctx) {
       if (!id || !snapshot) {
         return new Response("Missing id/snapshot", { status: 400 });
       }
-      await env.CHAT_HISTORY.put(`approval:${id}`, JSON.stringify({ status: "pending", snapshot }), { expirationTtl: 600 });
+      await env.CHAT_HISTORY.put(`approval:${id}`, JSON.stringify({ status: "pending", snapshot }), { expirationTtl: 3600 });
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" },
       });

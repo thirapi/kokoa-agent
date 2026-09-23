@@ -35,7 +35,7 @@ export function approvalKVKey(id) {
   return `approval:${id}`;
 }
 
-export async function saveApproval(env, id, record, ttlSeconds = 600) {
+export async function saveApproval(env, id, record, ttlSeconds = 3600) {
   await env.CHAT_HISTORY.put(approvalKVKey(id), JSON.stringify(record), { expirationTtl: ttlSeconds });
 }
 

@@ -17,7 +17,7 @@ import {
   saveApproval, stripMediaForSnapshot, approvalButtons, approvalPromptText,
 } from "../agent/approval.js";
 import { getValidModelsForProvider } from "../agent/models-discovery.js";
-import { isTransientNetworkError } from "../utils/net.js";
+import { isTransientNetworkError, noFinalTextMessage } from "../utils/net.js";
 import { markdownToRichHtml } from "../utils/formatter.js";
 import { shuffleArray } from "../utils/array.js";
 import { logError } from "../utils/logger.js";
@@ -554,7 +554,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
   // tersimpan ke history (Worker) maupun snapshot approval (Spaces) — kalau bocor,
   // sesi-sesi berikutnya terus ngomongin kode walau user cuma minta foto.
   currentContents = currentContents.filter(c => !c._selfReflection);
-  return { finalText, escalationTriggered, contents: currentContents };
+  return { finalText, escalationTriggered, contents: currentContents, filesModified, iterations: iteration };
 }
 
 const HEAVY_FILE_TOOLS = new Set([
@@ -806,7 +806,7 @@ export async function processMessage(message, env) {
       await sendTelegramMessage(
         env.TELEGRAM_BOT_TOKEN,
         chatId,
-        "tugasnya udah aku jalanin ya! tp aku ga dapet respons teks penutup dr sistem. coba cek repo kamu deh, harusnya kodenya udh ke-update",
+        noFinalTextMessage(result),
       );
     }
     } catch (err) {
