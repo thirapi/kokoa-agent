@@ -329,6 +329,53 @@ export async function handleAPI(request, env, ctx) {
     }
   }
 
+  // Outbound AI proxy: meneruskan request dari Spaces ke API AI eksternal
+  // (generativelanguage.googleapis.com, api.groq.com, openrouter.ai).
+  // Mengatasi pemblokiran NAT HF Spaces yang me-RST TLS langsung ke host AI.
+  // Pola diadopsi dari HuggingClaw.
+  if (path.startsWith("/api/ai-proxy/")) {
+    if (request.method !== "POST") {
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+    const auth = request.headers.get("Authorization");
+    if (auth !== `Bearer ${CALLBACK_TOKEN}`) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+    const targetHost = request.headers.get("x-target-host");
+    if (!targetHost) {
+      return new Response("Missing x-target-host", { status: 400 });
+    }
+    const subPath = path.slice("/api/ai-proxy".length);
+    const targetUrl = `https://${targetHost}${subPath}`;
+    try {
+      const bodyText = await request.text();
+      const reqHeaders = { "Content-Type": "application/json" };
+      const authHeader = request.headers.get("x-target-auth");
+      if (authHeader) reqHeaders["Authorization"] = authHeader;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
+      const aiRes = await fetch(targetUrl, {
+        method: "POST",
+        headers: reqHeaders,
+        body: bodyText,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      const resText = await aiRes.text();
+      return new Response(resText, {
+        status: aiRes.status,
+        headers: { "Content-Type": aiRes.headers.get("content-type") || "application/json" },
+      });
+    } catch (e) {
+      console.error("AI proxy error:", e);
+      return new Response(JSON.stringify({ error: { message: `Worker proxy error: ${e.message}` } }), {
+        status: 502,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+
   if (path.startsWith("/api/telegram-proxy/")) {
     if (request.method !== "POST") {
       return new Response("Method Not Allowed", { status: 405 });

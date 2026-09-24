@@ -10,6 +10,6 @@ COPY . .
 EXPOSE 7860
 
 ENV PORT=7860
-ENV NODE_OPTIONS="--dns-result-order=ipv4first"
+ENV NODE_OPTIONS="--dns-result-order=ipv4first --require ./src/utils/cloudflare-proxy.js"
 
 CMD ["node", "src/agent-server.js"]
