@@ -17,7 +17,7 @@ import {
   saveApproval, stripMediaForSnapshot, approvalButtons, approvalPromptText,
 } from "../agent/approval.js";
 import { getValidModelsForProvider } from "../agent/models-discovery.js";
-import { isTransientNetworkError, noFinalTextMessage } from "../utils/net.js";
+import { isTransientNetworkError, noFinalTextMessage, sleep } from "../utils/net.js";
 import { markdownToRichHtml } from "../utils/formatter.js";
 import { shuffleArray } from "../utils/array.js";
 import { logError } from "../utils/logger.js";
@@ -104,6 +104,13 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
   let lastError = null;
   let escalationHinted = false;
   let escalationTriggered = false;
+  // Hitung stall-retry: seluruh provider gagal murni karena jaringan (RST massal).
+  // Berbeda dengan retry cepat per-request (2-5 detik, untuk blip): di sini kita
+  // menunggu TIME_WAIT NAT clear (~45 detik, lihat docs/features.md §5.8).
+  // Hanya di Spaces (budget 240 detik); di Worker wall-clock 30 detik tidak muat.
+  let networkStallRetries = 0;
+  const MAX_STALL_RETRIES = 2;
+  const STALL_SLEEP_MS = 45000;
   const toolCache = new Map();
   let selfReflectionRun = false;
   let filesModified = false;
@@ -227,6 +234,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
     let providerUsed = null;
     lastError = null;
 
+    providerSweep: while (true) {
     for (const provider of providerConfigs) {
       if (failedProviders.has(provider.name)) continue;
       if (Date.now() - startTime > maxTime) break;
@@ -363,6 +371,21 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
 
       if (response) break;
       failedProviders.add(name);
+    }
+
+    // Seluruh provider gagal MURNI karena jaringan (RST massal, bukan 4xx/5xx/limit):
+    // jangan langsung mati — tunggu TIME_WAIT clear lalu sapu ulang dari awal.
+    // Blacklist di-clear karena itu hukuman untuk key/model yang sebenarnya sehat.
+    if (!response && networkStallRetries < MAX_STALL_RETRIES
+      && isTransientNetworkError(lastError?.message || lastError)
+      && env.IS_SPACES && Date.now() - startTime < maxTime - 100000) {
+      networkStallRetries++;
+      failedProviders.clear();
+      console.warn(`[Spaces] stall jaringan massal, tidur 45s (TIME_WAIT) lalu sapu ulang (${networkStallRetries}/${MAX_STALL_RETRIES})...`);
+      await sleep(STALL_SLEEP_MS);
+      continue providerSweep;
+    }
+    break;
     }
 
     if (!response) {
