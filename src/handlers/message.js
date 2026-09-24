@@ -737,8 +737,15 @@ export async function processMessage(message, env) {
           shouldReleaseLock = false;
           console.log(`[MsgLock] shouldReleaseLock=false (Spaces processing) for chat ${chatId}`);
           const { pollSpacesResult } = await import("../services/spaces-poll.js");
-          await pollSpacesResult(env, chatId, progressMsgId);
-          return;
+          const pollOk = await pollSpacesResult(env, chatId, progressMsgId);
+          // Kalau polling Spaces gagal karena error jaringan fatal (mis. RST massal),
+          // fallback langsung ke pemrosesan Worker daripada melempar error mentah ke user.
+          if (!pollOk) {
+            console.warn(`[MsgLock] Polling Spaces gagal, fallback ke pemrosesan Worker langsung untuk chat ${chatId}`);
+            shouldReleaseLock = true;
+          } else {
+            return;
+          }
         }
 
         // Busy — hapus progress message, release lock, user can retry
@@ -759,7 +766,6 @@ export async function processMessage(message, env) {
           await env.CHAT_HISTORY.delete(`progress_msg:${chatId}`).catch(() => {});
         }
         console.log(`[MsgLock] Spaces returned unknown status=${res?.status}, falling through for chat ${chatId}`);
-        return;
       } catch (e) {
         console.error("Spaces unreachable, falling back to direct processing:", e.message);
         // Hapus progress message karena Spaces gagal
@@ -769,6 +775,7 @@ export async function processMessage(message, env) {
           await deleteTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, parseInt(pid)).catch(() => {});
           await env.CHAT_HISTORY.delete(`progress_msg:${chatId}`).catch(() => {});
         }
+        // JANGAN return — biarkan jatuh ke pemrosesan langsung via Worker di bawah
       }
     }
 

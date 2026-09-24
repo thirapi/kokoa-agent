@@ -131,6 +131,7 @@ export async function pollSpacesResult(env, chatId, progressMsgId) {
   const maxTime = 30000;
   const startTime = Date.now();
   let attempt = 0;
+  let lastData = null;
   const delays = [0, 2000, 3000, 5000, 10000];
 
   while (Date.now() - startTime < maxTime) {
@@ -146,6 +147,7 @@ export async function pollSpacesResult(env, chatId, progressMsgId) {
         signal: AbortSignal.timeout(15000),
       });
       const data = await res.json();
+      lastData = data;
 
       if (data.status === 'processing') continue;
       if (data.status === 'not_found') continue;
@@ -160,6 +162,12 @@ export async function pollSpacesResult(env, chatId, progressMsgId) {
       await env.CHAT_HISTORY.put(mutexKey, "1", { expirationTtl: 120 });
 
       await handleSpacesResult(env, chatId, data, progressMsgId);
+      // Kalau result ternyata berisi error (mis. Client network socket disconnected),
+      // kembalikan false agar message.js tahu Spaces gagal dan bisa fallback ke Worker.
+      if (data.error) {
+        console.warn(`[ShortPoll] Spaces returned error: ${data.error}`);
+        return false;
+      }
       return true;
     } catch (e) {
       console.error(`[ShortPoll] Attempt ${attempt} failed for ${chatId}:`, e.message);
