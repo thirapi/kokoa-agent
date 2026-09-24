@@ -1,3 +1,6 @@
+// WAJIB import pertama: memasang transparent AI proxy SEBELUM modul lain dimuat
+// dan sebelum request outbound pertama. Lihat src/utils/cloudflare-proxy.js.
+import { setProxyWorkerUrl } from './utils/cloudflare-proxy.js';
 import { createServer } from 'http';
 import https from 'https';
 import { execSync } from 'child_process';
@@ -377,6 +380,9 @@ const server = createServer(async (req, res) => {
       // Store worker url for proxy & result polling
       if (reqWorkerUrl) {
         lastWorkerUrl = reqWorkerUrl;
+        // beri tahu transparent AI proxy (cloudflare-proxy.js) supaya request
+        // ke host AI dialihkan lewat Worker — hanya mungkin setelah URL diketahui
+        setProxyWorkerUrl(reqWorkerUrl);
       }
 
       const stringChatId = String(chatId);

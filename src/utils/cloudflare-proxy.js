@@ -14,8 +14,18 @@ const TARGET_HOSTS = new Set([
 
 const WORKER_SECRET = 'kokoa-runner-secret';
 
+// WORKER_URL di HF Spaces TIDAK berasal dari process.env saat container start.
+// Nilainya baru dikirim Worker lewat body request /api/process (workerUrl),
+// lalu disimpan di agent-server.js sebagai lastWorkerUrl. Karena file ini di-load
+// duluan via NODE_OPTIONS, harus baca secara LAZY + bisa di-update saat runtime —
+// kalau hanya process.env, proxy tidak pernah aktif (bug: TLS reset terus).
+let runtimeWorkerUrl = '';
+export function setProxyWorkerUrl(url) {
+  if (url) runtimeWorkerUrl = String(url);
+}
+
 function getWorkerUrl() {
-  return process.env.WORKER_URL || '';
+  return runtimeWorkerUrl || process.env.WORKER_URL || '';
 }
 
 function shouldProxy(hostname) {

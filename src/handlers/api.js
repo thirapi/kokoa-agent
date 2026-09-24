@@ -334,9 +334,6 @@ export async function handleAPI(request, env, ctx) {
   // Mengatasi pemblokiran NAT HF Spaces yang me-RST TLS langsung ke host AI.
   // Pola diadopsi dari HuggingClaw.
   if (path.startsWith("/api/ai-proxy/")) {
-    if (request.method !== "POST") {
-      return new Response("Method Not Allowed", { status: 405 });
-    }
     const auth = request.headers.get("Authorization");
     if (auth !== `Bearer ${CALLBACK_TOKEN}`) {
       return new Response("Unauthorized", { status: 401 });
@@ -345,22 +342,36 @@ export async function handleAPI(request, env, ctx) {
     if (!targetHost) {
       return new Response("Missing x-target-host", { status: 400 });
     }
+    // Allowlist ketat: tanpa ini endpoint ini jadi open proxy (secret-nya ada
+    // di repo publik) dan bisa dipakai menembak host internal Cloudflare.
+    const ALLOWED_AI_HOSTS = [
+      "generativelanguage.googleapis.com",
+      "api.groq.com",
+      "openrouter.ai",
+    ];
+    if (!ALLOWED_AI_HOSTS.includes(targetHost)) {
+      return new Response(`Host tidak diizinkan: ${targetHost}`, { status: 403 });
+    }
     const subPath = path.slice("/api/ai-proxy".length);
-    const targetUrl = `https://${targetHost}${subPath}`;
+    // WAJIB sertakan query string — Gemini auth lewat ?key=..., tanpa ini
+    // semua request proxied akan 401/403 dari sisi Google.
+    const targetUrl = `https://${targetHost}${subPath}${url.search}`;
     try {
-      const bodyText = await request.text();
-      const reqHeaders = { "Content-Type": "application/json" };
+      const method = request.method;
+      const reqHeaders = {};
+      const contentType = request.headers.get("content-type");
+      if (contentType) reqHeaders["Content-Type"] = contentType;
       const authHeader = request.headers.get("x-target-auth");
       if (authHeader) reqHeaders["Authorization"] = authHeader;
 
+      const fetchOpts = { method, headers: reqHeaders };
+      if (method !== "GET" && method !== "HEAD") {
+        fetchOpts.body = await request.text();
+      }
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 25000);
-      const aiRes = await fetch(targetUrl, {
-        method: "POST",
-        headers: reqHeaders,
-        body: bodyText,
-        signal: controller.signal,
-      });
+      const aiRes = await fetch(targetUrl, { ...fetchOpts, signal: controller.signal });
       clearTimeout(timeoutId);
       const resText = await aiRes.text();
       return new Response(resText, {
