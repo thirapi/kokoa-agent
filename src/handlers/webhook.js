@@ -136,9 +136,26 @@ export async function handleWebhook(request, env, ctx) {
       const decision = normalizedText.slice(0, sepIdx);
       const approvalId = normalizedText.slice(sepIdx + 1).trim();
       ctx.waitUntil((async () => {
-        const { loadApproval, deleteApproval } = await import("../agent/approval.js");
-        const approval = await loadApproval(env, approvalId);
-        if (!approval || approval.status !== "pending" || !approval.snapshot) {
+        const { loadApproval, saveApproval } = await import("../agent/approval.js");
+        // KV eventually-consistent: snapshot yang baru disimpan bisa belum
+        // terbaca (hingga ~60 detik). Retry dulu sebelum vonis kedaluwarsa.
+        let approval = await loadApproval(env, approvalId);
+        for (let i = 0; i < 2 && !approval; i++) {
+          await new Promise(r => setTimeout(r, 3000));
+          approval = await loadApproval(env, approvalId);
+        }
+        if (!approval || !approval.snapshot) {
+          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "approval-nya udah kedaluwarsa wkwk (berlaku 1 jam). kirim ulang aja perintahnya");
+          return;
+        }
+        // Sudah diproses (ketuk ganda / callback ganda dari Telegram) —
+        // JANGAN vonis kedaluwarsa, cukup beri tahu.
+        if (approval.status === "approved" || approval.status === "denied") {
+          await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId,
+            `yang ini udah aku proses tadi (${approval.status === "approved" ? "lanjut" : "batal"}) wkwk. tunggu hasilnya ya, atau ketuk tombol approval yang paling baru kalo ada`);
+          return;
+        }
+        if (approval.status !== "pending") {
           await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "approval-nya udah kedaluwarsa wkwk (berlaku 1 jam). kirim ulang aja perintahnya");
           return;
         }
@@ -147,7 +164,24 @@ export async function handleWebhook(request, env, ctx) {
           await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "bentar, masih ada yg jalan. klik lagi tombolnya abis ini ya");
           return;
         }
-        await deleteApproval(env, approvalId);
+        // Tandai consumed (BUKAN hapus) agar ketukan ganda Telegram tidak
+        // divonis "kedaluwarsa". Record hidup 5 menit untuk jendela double-tap.
+        await saveApproval(env, approvalId,
+          { status: decision === "approve" ? "approved" : "denied", snapshot: approval.snapshot }, 300);
+        // Copot tombol dari pesan yang diketuk agar tidak diketuk ulang (best-effort).
+        if (message.message_id) {
+          try {
+            await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/editMessageReplyMarkup`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                chat_id: Number(chatId),
+                message_id: message.message_id,
+                reply_markup: { inline_keyboard: [] },
+              }),
+            });
+          } catch (_) {}
+        }
         const snap = approval.snapshot;
         const resume = {
           contents: snap.contents,

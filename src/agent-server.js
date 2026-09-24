@@ -121,6 +121,30 @@ try {
 const PORT = parseInt(process.env.PORT || '7860', 10);
 
 const workspaceStore = new Map();
+// Pesan approval terakhir per chat — tombol pesan LAMA dijinakkan saat approval
+// baru terbit, agar user tidak mengetuk tombol basi lalu divonis kedaluwarsa.
+const lastApprovalMsg = new Map();
+
+async function notifyApprovalWithButtons(proxyFn, stringChatId, id, tool, toolArgs) {
+  const prev = lastApprovalMsg.get(stringChatId);
+  if (prev && prev.id !== id && prev.messageId) {
+    try {
+      await proxyFn('editMessageReplyMarkup', {
+        chat_id: Number(stringChatId),
+        message_id: prev.messageId,
+        reply_markup: { inline_keyboard: [] },
+      });
+    } catch {}
+  }
+  const r = await proxyFn('sendMessage', {
+    chat_id: Number(stringChatId),
+    text: approvalPromptText(tool, toolArgs),
+    parse_mode: 'HTML',
+    reply_markup: approvalButtons(id),
+  });
+  const mid = r?.result?.message_id;
+  if (mid) lastApprovalMsg.set(stringChatId, { id, messageId: mid });
+}
 // Task plan in-session per chat (Spaces tidak punya D1). Bentuk: { [chatId]: { seq, items: [...] } }
 const tasksMemStore = {};
 const resultsStore = new Map();
@@ -449,12 +473,7 @@ const server = createServer(async (req, res) => {
                 await postWorkerJSON('/api/approval-store', { id, snapshot: snap }, 10000, 3);
               },
               notifyApproval: async ({ id, tool, toolArgs }) => {
-                await proxyTelegram('sendMessage', {
-                  chat_id: Number(stringChatId),
-                  text: approvalPromptText(tool, toolArgs),
-                  parse_mode: 'HTML',
-                  reply_markup: approvalButtons(id),
-                });
+                await notifyApprovalWithButtons(proxyTelegram, stringChatId, id, tool, toolArgs);
               },
             }
           );
@@ -620,12 +639,7 @@ const server = createServer(async (req, res) => {
                 await postWorkerJSON('/api/approval-store', { id, snapshot: snap }, 10000, 3);
               },
               notifyApproval: async ({ id, tool, toolArgs }) => {
-                await proxyTelegram2('sendMessage', {
-                  chat_id: Number(stringChatId),
-                  text: approvalPromptText(tool, toolArgs),
-                  parse_mode: 'HTML',
-                  reply_markup: approvalButtons(id),
-                });
+                await notifyApprovalWithButtons(proxyTelegram2, stringChatId, id, tool, toolArgs);
               },
             }
           );
