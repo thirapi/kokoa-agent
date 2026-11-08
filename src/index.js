@@ -11,13 +11,6 @@ export default {
       return handleAPI(request, env, ctx);
     }
 
-    // Serve static assets (built web app) for GET/HEAD requests
-    if (request.method === "GET" || request.method === "HEAD") {
-      if (env.ASSETS) {
-        return env.ASSETS.fetch(request);
-      }
-    }
-
     // Route to webhook (Telegram)
     return handleWebhook(request, env, ctx);
   },

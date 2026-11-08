@@ -21,7 +21,7 @@ Dokumen ini menjelaskan alur kerja dan harness agent yang diadopsi dari arsitekt
 ## 2. Diagram Alur Harness Agent
 
 ```
-[ Telegram User / Web Chat ]
+[ Telegram User ]
              │
              ▼
 ┌─────────────────────────────────────────┐

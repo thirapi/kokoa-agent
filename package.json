@@ -6,9 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "build:web": "vite build --config web/vite.config.js",
-    "dev:web": "vite --config web/vite.config.js",
-    "deploy": "npm run build:web && wrangler deploy",
+    "deploy": "wrangler deploy",
     "db:create": "wrangler d1 create tg-bot-db",
     "db:init": "wrangler d1 execute tg-bot-db --file=src/db/schema.sql",
     "db:init:local": "wrangler d1 execute tg-bot-db --local --file=src/db/schema.sql"
@@ -17,17 +15,6 @@
     "@google/generative-ai": "^0.24.1"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.1.11",
-    "@vitejs/plugin-react": "^4.3.4",
-    "autoprefixer": "^10.4.20",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "lucide-react": "^0.475.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "tailwind-merge": "^2.6.0",
-    "tailwindcss": "^4.1.11",
-    "vite": "^6.1.0",
     "wrangler": "^3.109.0"
   }
 }

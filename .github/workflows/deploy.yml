@@ -19,10 +19,8 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install Dependencies & Build Web
-        run: |
-          npm ci
-          npm run build:web
+      - name: Install Dependencies
+        run: npm ci
 
       - name: Deploy to Cloudflare Workers
         env:
