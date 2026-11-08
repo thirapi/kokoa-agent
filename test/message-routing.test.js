@@ -103,6 +103,13 @@ describe("processMessage routing", () => {
     expect(sentTexts().some((t) => /kelamaan/.test(t))).toBe(true);
   });
 
+  it("sapaan memakai model lite lebih dulu", async () => {
+    env.GEMINI_MODELS = "gemini-3.6-flash,gemini-3.5-flash-lite";
+    fetchGeminiGenerate.mockResolvedValueOnce(text("haii"));
+    await processMessage(msg("haii"), env);
+    expect(fetchGeminiGenerate.mock.calls[0][0]).toBe("gemini-3.5-flash-lite");
+  });
+
   it("kasus nyata: 'haii' setelah tugas repo dijawab Worker", async () => {
     db.getHistory.mockResolvedValueOnce([
       { role: "user", parts: [{ text: "cek struktur repo thirapi/kokoa-agent" }] },

@@ -6,6 +6,7 @@ import { checkGroqQuota } from "../services/groq.js";
 import { clearHistory, acquireChatLock, releaseChatLock } from "../db/index.js";
 import { logError, getRecentErrors } from "../utils/logger.js";
 import { isValidTelegramWebhook } from "../utils/auth.js";
+import { getChatState, markUpdateSeen } from "../db/chat-state.js";
 
 // Identitas bot sendiri (untuk filter mention grup: hanya balas kalau BOT yang di-tag,
 // bukan saat user tag orang lain). Di-cache 7 hari di KV; bisa dioverride via BOT_USERNAME.
@@ -91,8 +92,6 @@ export async function handleWebhook(request, env, ctx) {
 
     const chatId = String(message.chat.id);
     const senderId = message.from ? String(message.from.id) : "";
-    const rateLimitKey = `rate_limit:${chatId}`;
-    const lastUpdateKey = `last_update:${chatId}`;
 
     const allowedIds = (env.ALLOWED_USER_ID || "")
       .split(",")
@@ -128,7 +127,8 @@ export async function handleWebhook(request, env, ctx) {
       }
     }
 
-    const lastUpdateId = await env.CHAT_HISTORY.get(lastUpdateKey);
+    const chatState = await getChatState(env, chatId);
+    const lastUpdateId = chatState.lastUpdateId;
     if (lastUpdateId === String(updateId)) {
       console.log(`Duplicate update ${updateId} for chat ${chatId}, skipping.`);
       return new Response("OK", { status: 200 });
@@ -202,7 +202,7 @@ export async function handleWebhook(request, env, ctx) {
           if (snap.runtime === "vercel" && env.VERCEL_AGENT_URL) {
             const { runnerAuthHeaders } = await import("../utils/auth.js");
             const { pickForwardedConfig, pickForwardedSecrets } = await import("../agent/detached-env.js");
-            await env.CHAT_HISTORY.delete(`hdl:${chatId}`).catch(() => {});
+            if (await env.CHAT_HISTORY.get(`hdl:${chatId}`)) await env.CHAT_HISTORY.delete(`hdl:${chatId}`).catch(() => {});
             const r = await fetch(env.VERCEL_AGENT_URL, {
               method: "POST",
               headers: runnerAuthHeaders(env, { "Content-Type": "application/json" }),
@@ -273,7 +273,7 @@ export async function handleWebhook(request, env, ctx) {
           if (!lockHandedOff) await releaseChatLock(env, chatId);
         }
       })());
-      await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
+      await markUpdateSeen(env, chatId, updateId);
       return new Response("OK", { status: 200 });
     }
 
@@ -289,14 +289,14 @@ export async function handleWebhook(request, env, ctx) {
           env.TELEGRAM_BOT_TOKEN, chatId,
           `skillnya ga ketemu bjir. yg ada: ${names}. contoh: /skill review-pr tolong review pr 42 di thirapi/kokoa-agent`
         ));
-        await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
+        await markUpdateSeen(env, chatId, updateId);
         return new Response("OK", { status: 200 });
       }
       await setForcedSkill(env, chatId, skill.name);
       const remainder = parts.slice(2).join(" ").trim();
       if (!remainder) {
         ctx.waitUntil((async () => {
-          await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
+          await markUpdateSeen(env, chatId, updateId);
           await sendTelegramMessage(
             env.TELEGRAM_BOT_TOKEN, chatId,
             `skill ${skill.name} aktif 10 menit ke depan wkwk. tinggal kirim aja maumu apa`
@@ -316,7 +316,7 @@ export async function handleWebhook(request, env, ctx) {
       ctx.waitUntil((async () => {
         const { setAgentMode } = await import("../agent/mode.js");
         await setAgentMode(env, chatId, mode);
-        await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
+        await markUpdateSeen(env, chatId, updateId);
         await sendTelegramMessage(
           env.TELEGRAM_BOT_TOKEN, chatId,
           mode === "plan"
@@ -329,7 +329,7 @@ export async function handleWebhook(request, env, ctx) {
 
     if (normalizedText === "/start" || normalizedText === "/reset") {
       ctx.waitUntil((async () => {
-        await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
+        await markUpdateSeen(env, chatId, updateId);
         await clearHistory(env, chatId);
         await releaseChatLock(env, chatId);
         await sendTelegramMessage(
@@ -343,7 +343,7 @@ export async function handleWebhook(request, env, ctx) {
 
     if (normalizedText === "/help" || normalizedText === "/menu") {
       ctx.waitUntil((async () => {
-        await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
+        await markUpdateSeen(env, chatId, updateId);
         const helpMsg =
           "<b>Halo! Pilih menu cepat di bawah ini atau ketik langsung permintaanmu:</b>";
         const inlineKeyboard = {
@@ -377,7 +377,7 @@ export async function handleWebhook(request, env, ctx) {
     if (normalizedText === "/unblock") {
       ctx.waitUntil((async () => {
         try {
-          await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
+          await markUpdateSeen(env, chatId, updateId);
           const geminiKeys = (env.GEMINI_API_KEYS || "").split(",").map((k) => k.trim()).filter(Boolean);
           const groqKeys = (env.GROQ_API_KEY || "").split(",").map((k) => k.trim()).filter(Boolean);
           const allKeys = [...geminiKeys, ...groqKeys];
@@ -414,7 +414,7 @@ export async function handleWebhook(request, env, ctx) {
     // /trace: jejak langkah demi langkah tugas terakhir (LLM, tool, approval, durasi).
     if (normalizedText === "/trace") {
       ctx.waitUntil((async () => {
-        await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
+        await markUpdateSeen(env, chatId, updateId);
         const { getLatestTaskTrace } = await import("../db/index.js");
         const { formatTrace } = await import("../agent/trace.js");
         await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, formatTrace(await getLatestTaskTrace(env, chatId)));
@@ -425,7 +425,7 @@ export async function handleWebhook(request, env, ctx) {
     if (normalizedText === "/logs" || normalizedText === "/error" || normalizedText === "/debug") {
       ctx.waitUntil((async () => {
         try {
-          await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
+          await markUpdateSeen(env, chatId, updateId);
           const errors = await getRecentErrors(env, chatId, 10);
           if (errors.length === 0) {
             await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "belum ada error yg tercatat.");
@@ -448,7 +448,7 @@ export async function handleWebhook(request, env, ctx) {
     if (normalizedText === "/quota" || normalizedText === "/keys") {
       ctx.waitUntil((async () => {
         try {
-          await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
+          await markUpdateSeen(env, chatId, updateId);
           await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "sip, tunggu bentar ya! aku cek dulu status koneksinya...");
           const geminiStatus = env.GEMINI_API_KEYS ? await checkGeminiQuota(env) : "";
           const groqStatus = env.GROQ_API_KEY ? await checkGroqQuota(env) : "";
@@ -462,7 +462,7 @@ export async function handleWebhook(request, env, ctx) {
       return new Response("OK", { status: 200 });
     }
 
-    const lastReqTimeStr = await env.CHAT_HISTORY.get(rateLimitKey);
+    const lastReqTimeStr = chatState.lastRequestAt != null ? String(chatState.lastRequestAt) : null;
     const now = Date.now();
     if (lastReqTimeStr) {
       const lastReqTime = parseInt(lastReqTimeStr);
@@ -488,10 +488,7 @@ export async function handleWebhook(request, env, ctx) {
       return new Response("OK", { status: 200 });
     }
 
-    await Promise.all([
-      env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 }),
-      env.CHAT_HISTORY.put(rateLimitKey, String(now), { expirationTtl: 60 }),
-    ]);
+    await markUpdateSeen(env, chatId, updateId, { requestAt: now });
 
     const requestUrl = new URL(request.url);
     const workerUrl = requestUrl.origin;

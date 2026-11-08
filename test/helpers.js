@@ -42,3 +42,18 @@ export function req(path, { method = "GET", headers = {}, body, auth } = {}) {
 }
 
 export const bearer = (s = SECRET) => `Bearer ${s}`;
+
+// D1 sungguhan-ish: SQLite in-memory (node:sqlite) dengan schema.sql asli.
+export async function sqliteD1() {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { readFileSync } = await import("node:fs");
+  const db = new DatabaseSync(":memory:");
+  db.exec(readFileSync(new URL("../src/db/schema.sql", import.meta.url), "utf8"));
+  const stmt = (sql, params = []) => ({
+    bind: (...p) => stmt(sql, p),
+    first: async () => db.prepare(sql).get(...params) ?? null,
+    run: async () => { const r = db.prepare(sql).run(...params); return { meta: { changes: r.changes } }; },
+    all: async () => ({ results: db.prepare(sql).all(...params) }),
+  });
+  return { prepare: (sql) => stmt(sql), batch: async (list) => Promise.all(list.map((s) => s.run())), _db: db };
+}

@@ -90,3 +90,12 @@ CREATE TABLE IF NOT EXISTS remote_jobs (
   prompt TEXT,
   started_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+
+-- Status per chat yang sering ditulis (dedupe update & rate limit). Dipindah dari KV
+-- (kuota gratis 1.000 tulis/hari) ke D1 (100.000 tulis/hari).
+CREATE TABLE IF NOT EXISTS chat_state (
+  chat_id TEXT PRIMARY KEY,
+  last_update_id TEXT,
+  last_request_at INTEGER,
+  updated_at INTEGER NOT NULL DEFAULT (unixepoch())
+);

@@ -168,7 +168,10 @@ export async function handleSpacesResult(env, chatId, data, progressMsgId, opts 
     } catch (_) {}
   }
 
-  await env.CHAT_HISTORY.put(`callback_done:${chatId}`, "1", { expirationTtl: 300 }).catch(() => {});
+  // callback_done hanya dipakai cron polling Spaces; hasil Vercel tidak butuh (hemat tulis KV).
+  if (opts.source !== "vercel") {
+    await env.CHAT_HISTORY.put(`callback_done:${chatId}`, "1", { expirationTtl: 300 }).catch(() => {});
+  }
   await env.CHAT_HISTORY.delete(`hdl:${chatId}`).catch(() => {});
   console.log(`[SpacesResult] Completed for chat ${chatId}`);
   return { retryable };
