@@ -1,4 +1,4 @@
-import { MAX_HISTORY, MAX_AGENT_ITERATIONS, EXECUTION_TIMEOUT, AGENT_ITERATION_TIMEOUT } from "../config.js";
+import { MAX_HISTORY, MAX_AGENT_ITERATIONS, EXECUTION_TIMEOUT, AGENT_ITERATION_TIMEOUT, WORKER_PROGRESS_DELAY_MS } from "../config.js";
 import { buildProviderConfigs, preferLightModels } from "../agent/providers.js";
 // Diekspor ulang untuk kompatibilitas (agent-server, remote-job, webhook, evals).
 export { buildProviderConfigs };
@@ -6,6 +6,7 @@ import { prepareMediaPart } from "../services/media.js";
 import {
   sendTelegramAction,
   sendTelegramMessage,
+  deleteTelegramMessage,
 } from "../services/telegram.js";
 import { executeTool } from "../tools/executor.js";
 import { runHarnessToolCall, isWriteTool, modifiesRepoFiles } from "../tools/harness.js";
@@ -876,6 +877,21 @@ export async function processMessage(message, env, options = {}) {
     let currentContents = [...history, { role: "user", parts: userParts }];
     const startTime = Date.now();
 
+    // Notifikasi proses di jalur Worker (Vercel/Spaces sudah punya sendiri): hanya muncul
+    // kalau kerjaannya lama (mis. menyiapkan MP3), lalu dihapus sebelum jawaban akhir.
+    let progressPromise = null;
+    const progressTimer = isSmallTalk(userPrompt) ? null : setTimeout(() => {
+      progressPromise = sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "Cocoa sedang bekerja... ⏳")
+        .then((sent) => sent?.[0]?.message_id ?? null)
+        .catch(() => null);
+    }, WORKER_PROGRESS_DELAY_MS);
+    const clearWorkerProgress = async () => {
+      clearTimeout(progressTimer);
+      const id = await progressPromise;
+      progressPromise = null;
+      if (id) await deleteTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, id).catch(() => {});
+    };
+
     let result;
     const tracer = createTracer();
     const saveTrace = (status) => saveTaskTrace(env, {
@@ -887,8 +903,10 @@ export async function processMessage(message, env, options = {}) {
         currentContents, env, chatId, userPrompt,
         providerConfigs, history, startTime, { tracer }
       );
+      await clearWorkerProgress();
       await saveTrace(traceStatus(result));
     } catch (err) {
+      await clearWorkerProgress();
       await saveTrace(err instanceof ApprovalPending ? "approval" : "error");
       // Worker kehabisan waktu & belum ada efek samping -> ulangi di Spaces (budget 240 detik).
       // forceRuntime = ini SUDAH fallback dari runtime jarak jauh; jangan pantulkan balik.

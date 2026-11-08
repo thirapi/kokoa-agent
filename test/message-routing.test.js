@@ -1,7 +1,7 @@
 // Integrasi processMessage: memastikan pembagian kerja Worker vs HF Spaces.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-vi.mock("../src/config.js", async (orig) => ({ ...(await orig()), EXECUTION_TIMEOUT: 60 }));
+vi.mock("../src/config.js", async (orig) => ({ ...(await orig()), EXECUTION_TIMEOUT: 60, WORKER_PROGRESS_DELAY_MS: 20 }));
 vi.mock("../src/services/gemini.js", () => ({ fetchGeminiGenerate: vi.fn() }));
 vi.mock("../src/services/groq.js", () => ({ fetchGroqGenerate: vi.fn() }));
 vi.mock("../src/services/openrouter.js", () => ({ fetchOpenRouterGenerate: vi.fn() }));
@@ -206,5 +206,29 @@ describe("processMessage routing", () => {
       await processMessage(msg("tolong cek bug di repo thirapi/kokoa-agent"), env);
       expect(vercelCalls()).toHaveLength(1);
     });
+  });
+});
+
+describe("notifikasi proses di jalur Worker", () => {
+  const isProgress = (t) => t === "Cocoa sedang bekerja... ⏳";
+
+  it("kerjaan lama -> notifikasi muncul lalu dihapus sebelum jawaban", async () => {
+    const { deleteTelegramMessage } = await import("../src/services/telegram.js");
+    fetchGeminiGenerate.mockImplementationOnce(() => slow(text("ini lagunya"), 40)); // > 20 ms jeda, < 60 ms batas
+    await processMessage(msg("kirim lagu lampu merah the lantis"), env);
+    const texts = sentTexts();
+    expect(texts.filter(isProgress)).toHaveLength(1);
+    expect(deleteTelegramMessage).toHaveBeenCalledWith(expect.anything(), "5", 99);
+    const delOrder = deleteTelegramMessage.mock.invocationCallOrder[0];
+    const answerOrder = sendTelegramMessage.mock.invocationCallOrder[texts.findIndex((t) => t.includes("ini lagunya"))];
+    expect(delOrder).toBeLessThan(answerOrder);
+  });
+
+  it("kerjaan cepat / basa-basi -> tidak ada notifikasi", async () => {
+    fetchGeminiGenerate.mockResolvedValueOnce(text("ini lagunya"));
+    await processMessage(msg("kirim lagu lampu merah the lantis"), env);
+    fetchGeminiGenerate.mockImplementationOnce(() => slow(text("haii juga"), 40));
+    await processMessage(msg("haii"), env);
+    expect(sentTexts().filter(isProgress)).toHaveLength(0);
   });
 });
