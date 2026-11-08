@@ -40,6 +40,14 @@ describe("agent-server dengan RUNNER_SECRET", () => {
     expect(old.status).toBe(401);
   });
 
+  it("/health?probe=1 publik, memulai diagnosa egress tanpa membocorkan secret", async () => {
+    const res = await fetch(`${srv.base}/health?probe=1`);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(JSON.parse(body).probe.running).toBe(true);
+    expect(body).not.toContain(SECRET);
+  });
+
   it("menerima token yang benar", async () => {
     const res = await fetch(`${srv.base}/api/result/123`, { headers: { Authorization: bearer() } });
     expect(res.status).toBe(200);

@@ -9,6 +9,7 @@ import { executeTool } from './tools/executor.js';
 import { executeSpacesTool, isSpacesTool } from './tools/spaces-executor.js';
 import { ApprovalPending, approvalButtons, approvalPromptText } from './agent/approval.js';
 import { isAuthorizedHeader, getRunnerSecret } from './utils/auth.js';
+import { triggerProbe } from './utils/egress-probe.js';
 
 const RUNNER_SECRET = getRunnerSecret(process.env);
 if (!RUNNER_SECRET) {
@@ -345,6 +346,12 @@ const server = createServer(async (req, res) => {
 
   if (url.pathname === '/health' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
+    if (url.searchParams.get('probe') === '1') {
+      // Diagnosa koneksi keluar HF (publik tapi tanpa data sensitif, maks 1x/menit).
+      const workerUrl = lastWorkerUrl || process.env.WORKER_URL || 'https://tg-bot.thirapi.workers.dev';
+      res.end(JSON.stringify({ status: 'ok', probe: triggerProbe(workerUrl, RUNNER_SECRET) }));
+      return;
+    }
     res.end(JSON.stringify({ status: 'ok', timestamp: Date.now() }));
     return;
   }

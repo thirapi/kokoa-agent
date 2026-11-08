@@ -91,6 +91,9 @@ function patchRequest(originalFn) {
   };
 }
 
+// Simpan versi asli (tanpa proxy) untuk diagnosa koneksi keluar (egress-probe.js).
+export const rawHttpsRequest = https.request;
+
 // Patch Node.js HTTP/HTTPS primitives
 https.request = patchRequest(https.request);
 http.request = patchRequest(http.request);
