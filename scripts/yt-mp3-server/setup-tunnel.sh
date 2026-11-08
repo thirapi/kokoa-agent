@@ -13,10 +13,18 @@ NAME="${TUNNEL_NAME:-yt-mp3}"
 DIR="$HOME/.cloudflared"
 CFG="$DIR/$NAME.yml"
 
-if ! cloudflared tunnel info "$NAME" >/dev/null 2>&1; then
+# Catatan: `cloudflared tunnel info <nama>` exit 0 walau tunnel tidak ada, jadi cek via daftar JSON.
+tunnel_id() {
+  cloudflared tunnel list -o json 2>/dev/null \
+    | python3 -c "import json,sys; print(next((t['id'] for t in json.load(sys.stdin) if t['name']==sys.argv[1]), ''))" "$NAME"
+}
+ID=$(tunnel_id)
+if [ -z "$ID" ]; then
   cloudflared tunnel create "$NAME"
+  ID=$(tunnel_id)
 fi
-ID=$(cloudflared tunnel list -o json | python3 -c "import json,sys; print(next(t['id'] for t in json.load(sys.stdin) if t['name']=='$NAME'))")
+[ -n "$ID" ] || { echo "Gagal membuat tunnel $NAME" >&2; exit 1; }
+[ -f "$DIR/$ID.json" ] || { echo "Kredensial $DIR/$ID.json tidak ada (tunnel dibuat di mesin lain?)" >&2; exit 1; }
 
 cat > "$CFG" <<EOF
 tunnel: $ID
