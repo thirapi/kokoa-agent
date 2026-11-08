@@ -224,7 +224,21 @@ async function proxyFinalText(proxyTelegram, stringChatId, finalText) {
   return r?.ok === true;
 }
 
+// Pengukuran egress (lihat docs/research/hf-egress-probe.md): dari HF, koneksi ke
+// *.workers.dev hanya lolos ~1 per jendela waktu, sisanya ECONNRESET. Maka Spaces
+// hanya membuat SATU panggilan ke Worker per tugas: kirim jawaban akhir ke Telegram.
+// Riwayat chat disimpan Worker sendiri saat mengambil hasil (poll/cron).
+// Hasil baru dipublikasikan SETELAH percobaan kirim selesai, supaya Worker tidak
+// ikut mengirim jawaban yang sama (dobel).
 async function finishSpacesResult(stringChatId, { finalText, newContent, escalationTriggered, progressMsgId, filesModified }, proxyTelegram) {
+  let proxySent = false;
+  if (lastWorkerUrl && finalText) {
+    try {
+      proxySent = await proxyFinalText(proxyTelegram, stringChatId, finalText);
+    } catch (e) {
+      console.error('[Spaces] proxy final failed:', e.message);
+    }
+  }
   const entry = {
     status: 'complete',
     finalText,
@@ -232,43 +246,14 @@ async function finishSpacesResult(stringChatId, { finalText, newContent, escalat
     escalationTriggered: !!escalationTriggered,
     filesModified: filesModified ?? null,
     error: null,
-    proxySent: false,
+    proxySent,
     historySynced: false,
     pendingMedia: takePendingMedia(stringChatId),
     progressMsgId: progressMsgId || null,
     ts: Date.now(),
   };
   resultsStore.set(stringChatId, entry);
-  if (!lastWorkerUrl) return entry;
-  if (finalText) {
-    try {
-      if (await proxyFinalText(proxyTelegram, stringChatId, finalText)) entry.proxySent = true;
-    } catch (e) {
-      console.error('[Spaces] proxy final failed:', e.message);
-    }
-  }
-  if (newContent && newContent.length > 0) {
-    // Retry 3x: jalur Spaces -> Worker kadang ECONNRESET sesaat (TLS reset).
-    let synced = false;
-    let lastErr = null;
-    for (let attempt = 1; attempt <= 3 && !synced; attempt++) {
-      try {
-        await postWorkerJSON('/api/spaces-callback', {
-          chatId: stringChatId, newContents: newContent, isFinal: true,
-        });
-        synced = true;
-      } catch (e) {
-        lastErr = e;
-        if (attempt < 3) await new Promise(r => setTimeout(r, 2000 * attempt));
-      }
-    }
-    if (synced) {
-      entry.historySynced = true;
-      console.log(`[Spaces] Synced new history to D1 for chat ${stringChatId}`);
-    } else {
-      console.error('[Spaces] Failed sync to D1 (3x):', lastErr?.message);
-    }
-  }
+  console.log(`[Spaces] Result ready for chat ${stringChatId} (proxySent=${proxySent})`);
   return entry;
 }
 

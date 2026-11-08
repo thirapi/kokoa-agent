@@ -12,11 +12,9 @@ import * as db from "../src/db/index.js";
 import { handleAPI } from "../src/handlers/api.js";
 import worker from "../src/index.js";
 import { baseEnv, fakeCtx, req, bearer } from "./helpers.js";
-import { MAX_HISTORY } from "../src/config.js";
 
 const PROTECTED = [
   ["POST", "/api/runner-callback"],
-  ["POST", "/api/spaces-callback"],
   ["GET", "/api/context/abc"],
   ["PUT", "/api/context/abc"],
   ["POST", "/api/memory"],
@@ -60,38 +58,13 @@ describe("auth semua endpoint /api/*", () => {
     expect(res.status).toBe(401);
   });
 
+  it("/api/spaces-callback sudah dihapus (Spaces tidak lagi memanggilnya)", async () => {
+    expect((await call("/api/spaces-callback", { method: "POST", auth: bearer(), body: { chatId: "1" } })).status).toBe(404);
+  });
+
   it("endpoint tak dikenal (termasuk web-chat lama) -> 404 untuk pemegang token, 401 untuk publik", async () => {
     expect((await call("/api/web-chat/send", { method: "POST", body: { message: "hi" } })).status).toBe(401);
     expect((await call("/api/web-chat/send", { method: "POST", auth: bearer(), body: { message: "hi" } })).status).toBe(404);
-  });
-});
-
-describe("/api/spaces-callback", () => {
-  it("menyimpan riwayat yang sudah dibersihkan lalu trim", async () => {
-    const res = await call("/api/spaces-callback", {
-      method: "POST", auth: bearer(),
-      body: { chatId: 42, isFinal: true, newContents: [
-        { role: "user", parts: [{ text: "halo" }, { inline_data: { mime_type: "image/png", data: "xx" } }] },
-        { role: "model", parts: [{ functionCall: { name: "webSearch", args: {} } }] },
-      ] },
-    });
-    expect(res.status).toBe(200);
-    expect(db.addHistory).toHaveBeenCalledWith(expect.anything(), "42", [
-      { role: "user", parts: [{ text: "halo" }, { text: "[Media: image/png]" }] },
-      { role: "model", parts: [{ text: "[FunctionCall: webSearch]" }] },
-    ]);
-    expect(db.trimHistory).toHaveBeenCalledWith(expect.anything(), "42", MAX_HISTORY);
-  });
-
-  it("tanpa newContents tidak menulis apa pun", async () => {
-    const res = await call("/api/spaces-callback", { method: "POST", auth: bearer(), body: { chatId: "1" } });
-    expect(res.status).toBe(200);
-    expect(db.addHistory).not.toHaveBeenCalled();
-  });
-
-  it("validasi chatId & method", async () => {
-    expect((await call("/api/spaces-callback", { method: "POST", auth: bearer(), body: {} })).status).toBe(400);
-    expect((await call("/api/spaces-callback", { method: "GET", auth: bearer() })).status).toBe(405);
   });
 });
 

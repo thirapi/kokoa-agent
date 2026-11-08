@@ -1,7 +1,5 @@
-import { updateTaskStatus, setMemory, deleteMemoriesByPrefix, getGHAContext, consumeGHAContext, getMemory, saveGHAContext, getHistory, addHistory, trimHistory } from "../db/index.js";
-import { MAX_HISTORY } from "../config.js";
+import { updateTaskStatus, setMemory, deleteMemoriesByPrefix, getGHAContext, consumeGHAContext, getMemory, saveGHAContext, getHistory } from "../db/index.js";
 import { isAuthorizedRequest } from "../utils/auth.js";
-import { cleanContentsForHistory } from "../utils/history.js";
 
 
 async function sendTelegramMessage(botToken, chatId, text) {
@@ -30,27 +28,6 @@ export async function handleAPI(request, env, ctx) {
   // Semua endpoint /api/* lain hanya untuk Spaces & GHA runner (fail-closed).
   if (!isAuthorizedRequest(request, env)) {
     return new Response("Unauthorized", { status: 401 });
-  }
-
-  // Spaces menyinkronkan riwayat chat ke D1 setelah agent loop selesai.
-  // Lock & pengiriman jawaban TIDAK diurus di sini — itu tugas spaces-poll/cron
-  // (handleSpacesResult), supaya tidak ada dua jalur yang melepas lock.
-  if (path === "/api/spaces-callback") {
-    if (request.method !== "POST") {
-      return new Response("Method Not Allowed", { status: 405 });
-    }
-    try {
-      const { chatId, newContents } = await request.json();
-      if (!chatId) return new Response("Missing chatId", { status: 400 });
-      if (Array.isArray(newContents) && newContents.length > 0) {
-        await addHistory(env, String(chatId), cleanContentsForHistory(newContents));
-        await trimHistory(env, String(chatId), MAX_HISTORY);
-      }
-      return new Response("OK", { status: 200 });
-    } catch (e) {
-      console.error("Spaces callback error:", e);
-      return new Response("Error", { status: 500 });
-    }
   }
 
   if (path === "/api/runner-callback") {

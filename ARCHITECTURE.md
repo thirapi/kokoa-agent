@@ -26,9 +26,13 @@ Telegram ──► Worker (webhook: verifikasi secret, allowlist, dedupe, rate l
 
 ## 3. Hasil dari Spaces kembali ke user
 
-1. Spaces mengirim jawaban langsung lewat `POST /api/telegram-proxy/sendMessage` di Worker.
-2. Spaces menyinkronkan riwayat lewat `POST /api/spaces-callback`.
-3. Worker mem-polling `GET /api/result/:chatId` (30 detik pertama), lalu cron tiap menit sebagai cadangan; keduanya memakai mutex `hdl:` + `callback_done:` agar tidak dobel kirim.
+Hasil ukur (`docs/research/hf-egress-probe.md`): dari HF, host AI & GitHub lancar langsung,
+`api.telegram.org` diblokir, dan `*.workers.dev` hanya lolos ~1 koneksi per jendela waktu.
+
+1. Spaces memanggil Gemini/Groq/OpenRouter/GitHub **langsung** (Worker `/api/ai-proxy` hanya cadangan).
+2. Spaces membuat **satu** panggilan ke Worker: `POST /api/telegram-proxy/sendMessage` untuk jawaban akhir.
+3. Worker mem-polling `GET /api/result/:chatId` (30 detik pertama), lalu cron tiap menit: simpan riwayat,
+   kirim jawaban kalau langkah 2 gagal, atau kerjakan ulang di Worker kalau Spaces gagal karena jaringan.
 
 ## 4. Keamanan
 

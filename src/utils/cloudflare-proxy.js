@@ -29,6 +29,13 @@ function getWorkerUrl() {
   return runtimeWorkerUrl || process.env.WORKER_URL || '';
 }
 
+// "direct" (default): host AI dihubungi langsung, Worker hanya cadangan bila gagal.
+// "proxy": perilaku lama (selalu lewat Worker). Diukur: dari HF, host AI lolos 100%
+// sementara *.workers.dev sering ECONNRESET — jadi proxy-first justru memperburuk.
+function aiEgressMode() {
+  return (process.env.AI_EGRESS_MODE || 'direct').toLowerCase() === 'proxy' ? 'proxy' : 'direct';
+}
+
 function shouldProxy(hostname) {
   if (!hostname) return false;
   const h = String(hostname).toLowerCase();
@@ -56,7 +63,7 @@ function patchRequest(originalFn) {
     const hostname = parsedUrl.hostname || opts.hostname || opts.host;
     const workerUrlStr = getWorkerUrl();
 
-    if (shouldProxy(hostname) && workerUrlStr && !opts._proxied) {
+    if (aiEgressMode() === 'proxy' && shouldProxy(hostname) && workerUrlStr && !opts._proxied) {
       try {
         const workerUrl = new URL(workerUrlStr);
         const targetPath = (parsedUrl.pathname || '') + (parsedUrl.search || '');
@@ -126,14 +133,19 @@ if (typeof globalThis.fetch === 'function') {
         delete newInit.agent;
         delete newInit.dispatcher;
 
+        // Urutan jalur sesuai mode; kalau jalur pertama gagal di level jaringan,
+        // coba jalur kedua. Request yang sudah dibatalkan pemanggil tidak diulang.
+        const viaWorker = () => originalFetch(proxyUrl, newInit);
+        const direct = () => originalFetch(input, init);
+        const [first, second, firstName, secondName] = aiEgressMode() === 'proxy'
+          ? [viaWorker, direct, 'worker', 'langsung']
+          : [direct, viaWorker, 'langsung', 'worker'];
         try {
-          return await originalFetch(proxyUrl, newInit);
+          return await first();
         } catch (e) {
-          // Jalur Space -> Worker putus (TLS reset NAT HF). Jangan menyerah: coba langsung
-          // ke host AI. Kalau request memang dibatalkan (timeout pemanggil), lempar saja.
           if (init?.signal?.aborted) throw e;
-          console.warn(`[cloudflare-proxy] proxy gagal (${e.message}), coba langsung ke ${u.hostname}`);
-          return originalFetch(input, init);
+          console.warn(`[cloudflare-proxy] ${u.hostname} via ${firstName} gagal (${e.message}), coba via ${secondName}`);
+          return second();
         }
       }
     } catch (e) {
