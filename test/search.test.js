@@ -51,6 +51,15 @@ describe("YouTube search (Innertube)", () => {
     expect(JSON.parse(fetch.mock.calls[0][1].body).query).toBe("idol");
   });
 
+  it("Innertube gagal sesaat -> dicoba sekali lagi", async () => {
+    let n = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => (++n === 1
+      ? new Response("", { status: 429 })
+      : new Response(JSON.stringify(innertube([{ videoId: "ZRtdQ81jPUQ", title: { runs: [{ text: "t" }] }, lengthText: { simpleText: "3:46" } }]))))));
+    expect((await youtubeSearchInnertube("idol"))[0].videoId).toBe("ZRtdQ81jPUQ");
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("Innertube gagal -> cadangan Invidious", async () => {
     vi.stubGlobal("fetch", vi.fn(async (u) => String(u).includes("youtubei")
       ? new Response("", { status: 500 })
@@ -113,7 +122,7 @@ describe("YouTube -> MP3", () => {
     const r = await youtubeMp3("rick astley", env);
     expect(r).toMatchObject({ title: "Lagu dQw4w9WgXcQ", channel: "Artis", format: "mp3", status: "ready" });
     expect(r.mp3Url).toMatch(/^https:\/\/mp3\.contoh\.id\/mp3\?v=dQw4w9WgXcQ&exp=\d+&sig=/);
-    expect(String(fetch.mock.calls[1][0])).toMatch(/\/prepare\?v=dQw4w9WgXcQ.*&wait=12$/);
+    expect(String(fetch.mock.calls[1][0])).toMatch(/\/prepare\?v=dQw4w9WgXcQ.*&wait=8$/);
   });
 
   it("tanpa konverter / konverter error -> error + watchUrl untuk fallback", async () => {

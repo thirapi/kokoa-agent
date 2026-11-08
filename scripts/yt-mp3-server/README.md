@@ -10,7 +10,7 @@ user: "kirim mp3 lagu X"
   └─ bot memanggil tool youtubeMp3("X")
        1. cari video di YouTube (Innertube, tanpa key)
        2. buat URL bertanda tangan:  <MP3_CONVERTER_URL>/mp3?v=<id>&exp=<unix>&sig=<hmac>
-       3. GET /prepare?...&wait=12  → server mulai yt-dlp + ffmpeg di background
+       3. GET /prepare?...&wait=8   → server mulai yt-dlp + ffmpeg di background
   └─ bot memanggil sendAudio(mp3Url)
        Telegram mengunduh /mp3 dari server ini → file .mp3 muncul di chat
 ```

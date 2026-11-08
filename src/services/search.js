@@ -227,11 +227,23 @@ async function searchGroqBrowser(query, env) {
 // Dipakai untuk full playback legal: bot bagikan link watch, user putar di YouTube.
 // Pencarian YouTube tanpa key lewat endpoint Innertube (dipakai web YouTube sendiri).
 // Instance Invidious publik sudah mati semua (diukur 2026-11-09) — jadi cadangan saja.
+// IP Cloudflare kadang ditolak/timeout sesaat oleh YouTube (smoke test sesekali gagal,
+// langsung lulus saat diulang) — jadi coba sekali lagi sebelum menyerah.
 export async function youtubeSearchInnertube(query) {
+  try {
+    return await youtubeSearchInnertubeOnce(query);
+  } catch (e) {
+    console.warn("[youtubeSearch] Innertube gagal, coba sekali lagi:", e.message);
+    await new Promise((r) => setTimeout(r, 400));
+    return await youtubeSearchInnertubeOnce(query);
+  }
+}
+
+async function youtubeSearchInnertubeOnce(query) {
   const res = await fetch("https://www.youtube.com/youtubei/v1/search?prettyPrint=false", {
     method: "POST",
     headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" },
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(7000),
     body: JSON.stringify({
       context: { client: { clientName: "WEB", clientVersion: "2.20250101.00.00", hl: "id", gl: "ID" } },
       query,
@@ -374,10 +386,10 @@ export async function youtubeMp3(query, env) {
   // 2. URL bertanda tangan untuk Telegram + minta server mulai konversi sekarang,
   //    supaya saat sendAudio dipanggil filenya sudah (hampir) siap.
   const mp3Url = await signMp3Url(base, secret, video.videoId);
-  const prepareUrl = (await signMp3Url(base, secret, video.videoId, 3600, "/prepare")) + "&wait=12";
+  const prepareUrl = (await signMp3Url(base, secret, video.videoId, 3600, "/prepare")) + "&wait=8";
   let status = "unknown";
   try {
-    const res = await fetch(prepareUrl, { signal: AbortSignal.timeout(15000) });
+    const res = await fetch(prepareUrl, { signal: AbortSignal.timeout(10000) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ...video, error: `Konversi MP3 gagal: ${data.error || `HTTP ${res.status}`}. Bagikan watchUrl saja.` };
     status = data.status || "unknown";
