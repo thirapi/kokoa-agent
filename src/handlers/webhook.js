@@ -197,6 +197,7 @@ export async function handleWebhook(request, env, ctx) {
           grantedKey: decision === "approve" ? snap.pending?.key : null,
           deniedKey: decision === "deny" ? snap.pending?.key : null,
         };
+        let lockHandedOff = false; // true = lock dilepas oleh pengantar hasil Spaces
         try {
           if (snap.runtime === "spaces" && env.HF_SPACES_URL) {
             const { runnerAuthHeaders } = await import("../utils/auth.js");
@@ -207,8 +208,16 @@ export async function handleWebhook(request, env, ctx) {
               signal: AbortSignal.timeout(15000),
             });
             if (!r.ok) throw new Error(`Spaces resume HTTP ${r.status}`);
-            await releaseChatLock(env, chatId);
-            return; // Spaces lanjutin loop + kirim hasil via proxy
+            // Daftarkan sebagai pending agar poll/cron mengambil hasilnya (koneksi
+            // Spaces -> Worker tidak bisa diandalkan). Lock dilepas saat hasil diantar.
+            const { addPendingSpace } = await import("../db/index.js");
+            await addPendingSpace(env, chatId);
+            lockHandedOff = true;
+            await env.CHAT_HISTORY.delete(`callback_done:${chatId}`).catch(() => {});
+            await env.CHAT_HISTORY.delete(`hdl:${chatId}`).catch(() => {});
+            const { pollSpacesResult } = await import("../services/spaces-poll.js");
+            await pollSpacesResult(env, chatId, null);
+            return;
           }
           const { runAgentLoop, buildProviderConfigs } = await import("./message.js");
           const providerConfigs = await buildProviderConfigs(env);
@@ -241,7 +250,7 @@ export async function handleWebhook(request, env, ctx) {
           console.error("[Approval] Resume failed:", e);
           await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "yah gagal lanjutin tugasnya... coba kirim ulang ya!");
         } finally {
-          await releaseChatLock(env, chatId);
+          if (!lockHandedOff) await releaseChatLock(env, chatId);
         }
       })());
       await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });

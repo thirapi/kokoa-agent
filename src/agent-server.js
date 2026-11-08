@@ -7,7 +7,7 @@ import { execSync } from 'child_process';
 import { runAgentLoop, buildProviderConfigs } from './handlers/message.js';
 import { executeTool } from './tools/executor.js';
 import { executeSpacesTool, isSpacesTool } from './tools/spaces-executor.js';
-import { ApprovalPending, approvalButtons, approvalPromptText } from './agent/approval.js';
+import { ApprovalPending } from './agent/approval.js';
 import { isAuthorizedHeader, getRunnerSecret } from './utils/auth.js';
 import { triggerProbe } from './utils/egress-probe.js';
 
@@ -137,29 +137,25 @@ try {
 const PORT = parseInt(process.env.PORT || '7860', 10);
 
 const workspaceStore = new Map();
-// Pesan approval terakhir per chat — tombol pesan LAMA dijinakkan saat approval
-// baru terbit, agar user tidak mengetuk tombol basi lalu divonis kedaluwarsa.
-const lastApprovalMsg = new Map();
+// Approval: snapshot + prompt TIDAK dikirim dari sini (koneksi Spaces -> Worker
+// sering di-RST HF). Keduanya ditaruh di hasil; Worker yang menyimpan snapshot dan
+// mengirim tombol saat mengambil hasil (poll/cron).
+function captureApproval() {
+  const box = {};
+  return {
+    box,
+    saveSnapshot: async (id, snapshot) => { box.id = id; box.snapshot = snapshot; },
+    notifyApproval: async ({ id, tool, toolArgs }) => { box.id = id; box.tool = tool; box.toolArgs = toolArgs; },
+  };
+}
 
-async function notifyApprovalWithButtons(proxyFn, stringChatId, id, tool, toolArgs) {
-  const prev = lastApprovalMsg.get(stringChatId);
-  if (prev && prev.id !== id && prev.messageId) {
-    try {
-      await proxyFn('editMessageReplyMarkup', {
-        chat_id: Number(stringChatId),
-        message_id: prev.messageId,
-        reply_markup: { inline_keyboard: [] },
-      });
-    } catch {}
-  }
-  const r = await proxyFn('sendMessage', {
-    chat_id: Number(stringChatId),
-    text: approvalPromptText(tool, toolArgs),
-    parse_mode: 'HTML',
-    reply_markup: approvalButtons(id),
-  });
-  const mid = r?.result?.message_id;
-  if (mid) lastApprovalMsg.set(stringChatId, { id, messageId: mid });
+function approvalResult(box, progressMsgId) {
+  return {
+    status: 'complete', finalText: null, newContent: [], escalationTriggered: false,
+    error: null, proxySent: false, historySynced: false,
+    approval: { id: box.id, snapshot: box.snapshot, tool: box.tool, toolArgs: box.toolArgs || {} },
+    pendingMedia: [], progressMsgId: progressMsgId || null, ts: Date.now(),
+  };
 }
 // Task plan in-session per chat (Spaces tidak punya D1). Bentuk: { [chatId]: { seq, items: [...] } }
 const tasksMemStore = {};
@@ -172,48 +168,6 @@ setInterval(() => {
   }
 }, 60000);
 let lastWorkerUrl = null;
-
-async function postWorkerJSON(path, obj, timeoutMs = 10000, attempts = 1) {
-  if (!lastWorkerUrl) throw new Error('WORKER_URL belum tersedia');
-  let lastErr = null;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return await postWorkerJSONOnce(path, obj, timeoutMs);
-    } catch (e) {
-      lastErr = e;
-      // 4xx = salah request/auth, retry tidak membantu. 5xx/network/timeout = coba lagi.
-      if (/Worker 4\d\d/.test(e.message)) throw e;
-      if (i < attempts - 1) await new Promise(r => setTimeout(r, 2000 * (i + 1)));
-    }
-  }
-  throw lastErr;
-}
-
-function postWorkerJSONOnce(path, obj, timeoutMs) {
-  const bodyStr = JSON.stringify(obj);
-  return new Promise((resolve, reject) => {
-    const u = new URL(path, lastWorkerUrl);
-    const req = https.request({
-      hostname: u.hostname,
-      path: u.pathname + u.search,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': RUNNER_AUTH,
-        'Content-Length': Buffer.byteLength(bodyStr),
-      },
-      timeout: timeoutMs,
-    }, (res) => {
-      let d = '';
-      res.on('data', c => d += c);
-      res.on('end', () => (res.statusCode >= 200 && res.statusCode < 300) ? resolve(d) : reject(new Error(`Worker ${res.statusCode}`)));
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
-    req.write(bodyStr);
-    req.end();
-  });
-}
 
 async function proxyFinalText(proxyTelegram, stringChatId, finalText) {
   const { markdownToRichHtml } = await import("./utils/formatter.js");
@@ -440,6 +394,7 @@ const server = createServer(async (req, res) => {
           return null;
         }
 
+        const approvalCap = captureApproval();
         try {
           const originalHistoryLength = rawContents ? rawContents.length - 1 : 0;
           const currentContents = rawContents || [{ role: 'user', parts: [{ text: userPrompt || '' }] }];
@@ -477,12 +432,8 @@ const server = createServer(async (req, res) => {
             {
               executionTimeout: 240000, iterationTimeout: 30000, toolExecutor: hybridExecutor,
               runtime: 'spaces',
-              saveSnapshot: async (id, snap) => {
-                await postWorkerJSON('/api/approval-store', { id, snapshot: snap }, 10000, 3);
-              },
-              notifyApproval: async ({ id, tool, toolArgs }) => {
-                await notifyApprovalWithButtons(proxyTelegram, stringChatId, id, tool, toolArgs);
-              },
+              saveSnapshot: approvalCap.saveSnapshot,
+              notifyApproval: approvalCap.notifyApproval,
             }
           );
 
@@ -512,7 +463,7 @@ const server = createServer(async (req, res) => {
 
         } catch (err) {
           if (err instanceof ApprovalPending || err?.message === '__APPROVAL_PENDING__') {
-            resultsStore.set(stringChatId, { status: 'awaiting_approval', approvalId: err.approvalId, ts: Date.now() });
+            resultsStore.set(stringChatId, approvalResult(approvalCap.box, progressMsgId));
             console.log(`[Spaces] Loop paused awaiting approval ${err.approvalId} for chat ${stringChatId}`);
             return;
           }
@@ -608,6 +559,7 @@ const server = createServer(async (req, res) => {
           return null;
         }
 
+        const approvalCap = captureApproval();
         try {
           const proxyEnv = buildProxyEnv(process.env);
           if (lastWorkerUrl) proxyEnv.WORKER_URL = lastWorkerUrl;
@@ -643,12 +595,8 @@ const server = createServer(async (req, res) => {
             {
               executionTimeout: 240000, iterationTimeout: 30000, toolExecutor: hybridExecutor,
               runtime: 'spaces', resume,
-              saveSnapshot: async (id, snap) => {
-                await postWorkerJSON('/api/approval-store', { id, snapshot: snap }, 10000, 3);
-              },
-              notifyApproval: async ({ id, tool, toolArgs }) => {
-                await notifyApprovalWithButtons(proxyTelegram2, stringChatId, id, tool, toolArgs);
-              },
+              saveSnapshot: approvalCap.saveSnapshot,
+              notifyApproval: approvalCap.notifyApproval,
             }
           );
 
@@ -673,7 +621,7 @@ const server = createServer(async (req, res) => {
           console.log(`[Spaces] Resume completed for chat ${stringChatId}`);
         } catch (err) {
           if (err instanceof ApprovalPending || err?.message === '__APPROVAL_PENDING__') {
-            resultsStore.set(stringChatId, { status: 'awaiting_approval', approvalId: err.approvalId, ts: Date.now() });
+            resultsStore.set(stringChatId, approvalResult(approvalCap.box, null));
             console.log(`[Spaces] Resume paused again awaiting approval ${err.approvalId}`);
             return;
           }

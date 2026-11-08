@@ -19,7 +19,6 @@ const PROTECTED = [
   ["PUT", "/api/context/abc"],
   ["POST", "/api/memory"],
   ["GET", "/api/memory/1/key"],
-  ["POST", "/api/approval-store"],
   ["POST", "/api/ai-proxy/v1beta/models"],
   ["POST", "/api/telegram-proxy/sendMessage"],
   ["GET", "/api/history/123"],

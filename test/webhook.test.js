@@ -7,12 +7,15 @@ vi.mock("../src/services/telegram.js", () => ({
 }));
 vi.mock("../src/db/index.js", () => ({
   clearHistory: vi.fn(), acquireChatLock: vi.fn(async () => true), releaseChatLock: vi.fn(),
+  addPendingSpace: vi.fn(async () => {}),
 }));
+vi.mock("../src/services/spaces-poll.js", () => ({ pollSpacesResult: vi.fn(async () => true) }));
 vi.mock("../src/utils/logger.js", () => ({ logError: vi.fn(async () => {}), getRecentErrors: vi.fn(async () => []) }));
 
 import { handleWebhook, isBotMentioned } from "../src/handlers/webhook.js";
 import { processMessage } from "../src/handlers/message.js";
 import * as db from "../src/db/index.js";
+import { pollSpacesResult } from "../src/services/spaces-poll.js";
 import { baseEnv, fakeCtx, req } from "./helpers.js";
 
 const update = (text, { from = 111, chat = 111, updateId = Math.floor(Math.random() * 1e9) } = {}) => ({
@@ -94,6 +97,27 @@ describe("handleWebhook", () => {
       await ctx.flush();
       expect(processMessage).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe("tombol approval untuk tugas di Spaces", () => {
+  it("✅ -> resume di Spaces, didaftarkan untuk polling, lock TIDAK dilepas lebih awal", async () => {
+    env.HF_SPACES_URL = "https://space.test";
+    await env.CHAT_HISTORY.put("approval:ap1", JSON.stringify({
+      status: "pending",
+      snapshot: { runtime: "spaces", chatId: "111", contents: [], pending: { tool: "mergePullRequest", key: "k" } },
+    }));
+    globalThis.fetch.mockImplementation(async () => new Response("{}", { status: 200 }));
+    const cb = { update_id: 900, callback_query: { id: "q", data: "approve:ap1", from: { id: 111 }, message: { message_id: 3, chat: { id: 111, type: "private" } } } };
+    await handleWebhook(post(cb), env, ctx);
+    await ctx.flush();
+    const resumeCall = globalThis.fetch.mock.calls.find(([u]) => String(u) === "https://space.test/api/resume");
+    expect(resumeCall).toBeTruthy();
+    expect(new Headers(resumeCall[1].headers).get("Authorization")).toBe(`Bearer ${env.RUNNER_SECRET}`);
+    expect(db.addPendingSpace).toHaveBeenCalledWith(env, "111");
+    expect(pollSpacesResult).toHaveBeenCalledWith(env, "111", null);
+    expect(db.releaseChatLock).not.toHaveBeenCalled();
+    expect(JSON.parse(await env.CHAT_HISTORY.get("approval:ap1")).status).toBe("approved");
   });
 });
 

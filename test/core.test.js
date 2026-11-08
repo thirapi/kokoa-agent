@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { markdownToRichHtml, splitIntoChunks, stripHtml } from "../src/utils/formatter.js";
 import { runHarnessToolCall, safeTruncate, isWriteTool, modifiesRepoFiles } from "../src/tools/harness.js";
-import { isHighRiskTool, toolCallKey, stripMediaForSnapshot, approvalPromptText, saveApproval, loadApproval } from "../src/agent/approval.js";
+import { isHighRiskTool, needsApproval, toolCallKey, stripMediaForSnapshot, approvalPromptText, saveApproval, loadApproval } from "../src/agent/approval.js";
 import { validateToolArgs, isReadOnlyTool, getToolsForMode } from "../src/agent/registry.js";
 import { isTransientNetworkError, withNetworkRetry, noFinalTextMessage } from "../src/utils/net.js";
 import { compactWithEvicted } from "../src/agent/compaction.js";
@@ -61,10 +61,24 @@ describe("harness", () => {
 });
 
 describe("approval", () => {
-  it("tool berisiko wajib approval", () => {
-    for (const t of ["runCommand", "mergePullRequest", "deleteFile", "triggerDeveloperWorkflow"]) expect(isHighRiskTool(t)).toBe(true);
+  it("izin hanya untuk perubahan langsung di GitHub", () => {
+    for (const t of ["mergePullRequest", "deleteFile", "createOrUpdateFile"]) expect(needsApproval(t, {})).toBe(true);
+    // PR & workflow GHA menghasilkan PR yang bisa direview -> tanpa izin
+    for (const t of ["createPullRequest", "triggerDeveloperWorkflow", "webSearch", "cloneRepo"]) expect(needsApproval(t, {})).toBe(false);
     expect(isHighRiskTool("webSearch")).toBe(false);
   });
+
+  it("kasus nyata: runCommand menulis file di workspace Spaces -> langsung jalan", () => {
+    const cmd = "cat << 'EOF' > main.go\npackage main\n\nimport \"fmt\"\nEOF";
+    expect(needsApproval("runCommand", { command: cmd })).toBe(false);
+  });
+
+  it.each(["go build ./... && go test ./...", "npm install", "rm -rf node_modules", "curl -s https://example.com", "ls -la /tmp", "rm -rf /tmp/x"])(
+    "runCommand lokal tanpa izin: %s", (command) => expect(needsApproval("runCommand", { command })).toBe(false));
+
+  it.each(["git push origin main", "cd repo && git push -f", "gh pr merge 1", "npm publish", "curl -X POST https://api.x", "curl -d a=1 https://x",
+    "rm -rf /", "rm -rf ~", "git remote set-url origin https://evil"])(
+    "runCommand yang menyentuh dunia luar butuh izin: %s", (command) => expect(needsApproval("runCommand", { command })).toBe(true));
 
   it("toolCallKey stabil & sensitif terhadap argumen", () => {
     expect(toolCallKey("a", { x: 1 })).toBe(toolCallKey("a", { x: 1 }));

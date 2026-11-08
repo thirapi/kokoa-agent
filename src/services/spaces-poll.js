@@ -4,6 +4,26 @@ import { cleanContentsForHistory } from "../utils/history.js";
 import { MAX_HISTORY } from "../config.js";
 import { isRetryableSpacesError } from "../agent/route.js";
 
+// Simpan snapshot approval (KV) lalu kirim tombol ✅/❌. Tombol approval sebelumnya
+// di chat yang sama dicopot agar tidak diketuk saat sudah basi.
+export async function sendApprovalPrompt(env, chatId, approval) {
+  const { saveApproval, approvalPromptText, approvalButtons } = await import("../agent/approval.js");
+  const { sendTelegramMessage } = await import("../services/telegram.js");
+  await saveApproval(env, approval.id, { status: "pending", snapshot: approval.snapshot });
+  const prevMsgId = await env.CHAT_HISTORY.get(`last_approval_msg:${chatId}`);
+  if (prevMsgId) {
+    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/editMessageReplyMarkup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, message_id: Number(prevMsgId), reply_markup: { inline_keyboard: [] } }),
+    }).catch(() => {});
+  }
+  const sent = await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId,
+    approvalPromptText(approval.tool, approval.toolArgs), approvalButtons(approval.id));
+  const mid = Array.isArray(sent) ? sent[sent.length - 1]?.message_id : null;
+  if (mid) await env.CHAT_HISTORY.put(`last_approval_msg:${chatId}`, String(mid), { expirationTtl: 3600 });
+}
+
 // opts.fallbackOnRetryable: pemanggil akan mengerjakan ulang di Worker bila Spaces gagal
 // karena jaringan/provider. Dalam kasus itu: jangan kirim pesan error, jangan lepas lock,
 // jangan proses antrean — pemanggil yang melanjutkan. Return { retryable }.
@@ -44,7 +64,13 @@ export async function handleSpacesResult(env, chatId, data, progressMsgId, opts 
     }
   } catch (e) { console.error(`[SpacesResult] Queued media block FAIL:`, e.message); }
 
-  if (retryable) {
+  if (data.approval?.id && data.approval?.snapshot) {
+    // Spaces berhenti menunggu izin: simpan snapshot & kirim tombol dari sini.
+    try {
+      await sendApprovalPrompt(env, chatId, data.approval);
+      console.log(`[SpacesResult] Approval ${data.approval.id} dikirim untuk ${chatId}`);
+    } catch (e) { console.error(`[SpacesResult] Approval FAIL:`, e.message); }
+  } else if (retryable) {
     console.warn(`[SpacesResult] Spaces gagal (${String(data.error).slice(0, 80)}), dikerjakan ulang di Worker untuk ${chatId}`);
   } else if (!data.proxySent) {
     try {

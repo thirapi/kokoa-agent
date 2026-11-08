@@ -2,17 +2,44 @@
 // user via tombol inline sebelum dieksekusi. Loop di-pause (snapshot),
 // dilanjutkan lagi saat user klik ✅ / ❌ (suspend → resume).
 
+// Prinsip: minta izin HANYA untuk aksi yang mengubah sesuatu di luar sandbox dan
+// sulit dibatalkan. Pekerjaan di workspace Spaces (/tmp, hilang saat restart) atau di
+// runner GitHub Actions (VM sekali pakai, hasilnya berupa PR yang bisa direview)
+// tidak perlu izin — menunggu tombol hanya membuang waktu.
+//
+// - createOrUpdateFile / deleteFile: commit LANGSUNG ke repo GitHub.
+// - mergePullRequest: mengubah branch target.
 export const HIGH_RISK_TOOLS = new Set([
   'createOrUpdateFile',
   'deleteFile',
-  'createPullRequest',
   'mergePullRequest',
-  'runCommand',
-  'triggerDeveloperWorkflow',
 ]);
+
+// runCommand di workspace Spaces: bebas, KECUALI perintah yang menyentuh dunia luar.
+// (Remote git hasil cloneRepo berisi token, jadi `git push` benar-benar mendorong ke GitHub.)
+const RISKY_COMMAND = new RegExp([
+  String.raw`\bgit\s+push\b`,
+  String.raw`\bgit\s+remote\s+(set-url|add)\b`,
+  String.raw`\bgh\s+(pr|repo|release|issue|api|workflow|secret)\b`,
+  String.raw`\bnpm\s+(publish|unpublish|deprecate)\b`,
+  String.raw`\b(curl|wget)\b[^|;&]*(-X\s*(POST|PUT|PATCH|DELETE)|--data\b|--data-\w+|-d\s|--upload-file|-T\s|--method[= ](POST|PUT|PATCH|DELETE))`,
+  String.raw`\brm\s+(-\w*\s+)*(\/(?!tmp\b)|~|\$HOME)`,
+  String.raw`\b(shutdown|reboot|kill\s+-9\s+1|mkfs)\b`,
+].join("|"), "i");
+
+export function isRiskyCommand(command) {
+  return RISKY_COMMAND.test(String(command || ""));
+}
 
 export function isHighRiskTool(name) {
   return HIGH_RISK_TOOLS.has(name);
+}
+
+// Keputusan akhir: butuh tombol izin atau tidak.
+export function needsApproval(name, args = {}) {
+  if (HIGH_RISK_TOOLS.has(name)) return true;
+  if (name === 'runCommand' || name === 'executeCommand') return isRiskyCommand(args?.command);
+  return false;
 }
 
 export function toolCallKey(name, args) {

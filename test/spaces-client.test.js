@@ -93,6 +93,28 @@ describe("pollSpacesResult", () => {
 });
 
 describe("handleSpacesResult", () => {
+  it("kasus nyata: Spaces menunggu izin -> Worker simpan snapshot & kirim tombol, TANPA pesan 'loop selesai'", async () => {
+    fetchMock.mockResolvedValue(json({}));
+    const approval = { id: "ap1", tool: "mergePullRequest", toolArgs: { pull_number: 3 }, snapshot: { runtime: "spaces", chatId: "9", pending: { tool: "mergePullRequest", key: "k" } } };
+    await handleSpacesResult(env, "9", { status: "ready", finalText: null, newContent: [], approval }, null);
+    expect(JSON.parse(await env.CHAT_HISTORY.get("approval:ap1"))).toMatchObject({ status: "pending", snapshot: { runtime: "spaces" } });
+    expect(sendTelegramMessage).toHaveBeenCalledTimes(1);
+    const [, , text, markup] = sendTelegramMessage.mock.calls[0];
+    expect(text).toContain("mergePullRequest");
+    expect(JSON.stringify(markup)).toContain("approve:ap1");
+    expect(sendTelegramMessage.mock.calls.some((c) => /teks penutupnya/.test(c[2]))).toBe(false);
+    expect(db.releaseChatLock).toHaveBeenCalledWith(env, "9");
+    expect(await env.CHAT_HISTORY.get("last_approval_msg:9")).toBe("1");
+  });
+
+  it("approval baru mencopot tombol approval lama", async () => {
+    fetchMock.mockResolvedValue(json({}));
+    await env.CHAT_HISTORY.put("last_approval_msg:9", "77");
+    await handleSpacesResult(env, "9", { status: "ready", approval: { id: "ap2", tool: "deleteFile", snapshot: {} } }, null);
+    const edit = fetchMock.mock.calls.find(([u]) => String(u).includes("editMessageReplyMarkup"));
+    expect(JSON.parse(edit[1].body)).toMatchObject({ chat_id: "9", message_id: 77 });
+  });
+
   it("tidak menyimpan riwayat dua kali bila Spaces sudah sync via callback", async () => {
     fetchMock.mockResolvedValue(json({}));
     await handleSpacesResult(env, "9", { status: "ready", finalText: "x", newContent: [{ role: "model", parts: [{ text: "x" }] }], historySynced: true });

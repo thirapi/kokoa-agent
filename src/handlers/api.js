@@ -164,23 +164,6 @@ export async function handleAPI(request, env, ctx) {
     return new Response("Method Not Allowed", { status: 405 });
   }
 
-  // Spaces menitipkan snapshot approval ke KV Worker (agar survive restart + bisa di-resume)
-  if (path === "/api/approval-store" && request.method === "POST") {
-    try {
-      const body = await request.json();
-      const { id, snapshot } = body;
-      if (!id || !snapshot) {
-        return new Response("Missing id/snapshot", { status: 400 });
-      }
-      await env.CHAT_HISTORY.put(`approval:${id}`, JSON.stringify({ status: "pending", snapshot }), { expirationTtl: 3600 });
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { "Content-Type": "application/json" },
-      });
-    } catch (e) {
-      return new Response(JSON.stringify({ ok: false, error: e.message }), { status: 500 });
-    }
-  }
-
   // Outbound AI proxy: meneruskan request dari Spaces ke API AI eksternal
   // (generativelanguage.googleapis.com, api.groq.com, openrouter.ai).
   // Mengatasi pemblokiran NAT HF Spaces yang me-RST TLS langsung ke host AI.

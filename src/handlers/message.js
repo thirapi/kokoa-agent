@@ -14,7 +14,7 @@ import { detectScope, extractLatestUserText, recentUserTexts, isRepoTool } from 
 import { resolveAgentMode } from "../agent/mode.js";
 import { chooseRuntime, shouldRetryOnSpaces } from "../agent/route.js";
 import {
-  isHighRiskTool, toolCallKey, ApprovalPending,
+  needsApproval, toolCallKey, ApprovalPending,
   saveApproval, stripMediaForSnapshot, approvalButtons, approvalPromptText,
 } from "../agent/approval.js";
 import { getValidModelsForProvider } from "../agent/models-discovery.js";
@@ -447,7 +447,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
           } else if (resume?.deniedKey && resume.deniedKey === tKey) {
             console.log(`[Approval] Denied tool ${name} in chat ${chatId}`);
             return { error: "user membatalkan tool ini. jelaskan secara singkat, tawarkan alternatif, dan jangan panggil lagi tool yang sama." };
-          } else if (agentMode === 'build' && isHighRiskTool(name)) {
+          } else if (agentMode === 'build' && needsApproval(name, args || {})) {
             const requiresApproval = options.requiresApproval
               ? await options.requiresApproval(name, args).catch(() => true)
               : true;
