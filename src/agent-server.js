@@ -145,7 +145,7 @@ function captureApproval() {
   return {
     box,
     saveSnapshot: async (id, snapshot) => { box.id = id; box.snapshot = snapshot; },
-    notifyApproval: async ({ id, tool, toolArgs }) => { box.id = id; box.tool = tool; box.toolArgs = toolArgs; },
+    notifyApproval: async ({ id, tool, toolArgs, reason }) => { box.id = id; box.tool = tool; box.toolArgs = toolArgs; box.reason = reason || ''; },
   };
 }
 
@@ -153,7 +153,7 @@ function approvalResult(box, progressMsgId) {
   return {
     status: 'complete', finalText: null, newContent: [], escalationTriggered: false,
     error: null, proxySent: false, historySynced: false,
-    approval: { id: box.id, snapshot: box.snapshot, tool: box.tool, toolArgs: box.toolArgs || {} },
+    approval: { id: box.id, snapshot: box.snapshot, tool: box.tool, toolArgs: box.toolArgs || {}, reason: box.reason || '' },
     pendingMedia: [], progressMsgId: progressMsgId || null, ts: Date.now(),
   };
 }

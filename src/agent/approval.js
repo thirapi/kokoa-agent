@@ -87,7 +87,12 @@ export function stripMediaForSnapshot(contents) {
     role: c.role,
     parts: (c.parts || []).map(p => {
       if (p.inline_data) return { text: `[Media: ${p.inline_data.mime_type}]` };
-      if (p.functionCall) return { functionCall: p.functionCall };
+      // thoughtSignature WAJIB ikut: tanpa itu Gemini 3 menolak resume (400).
+      if (p.functionCall) {
+        return p.thoughtSignature
+          ? { functionCall: p.functionCall, thoughtSignature: p.thoughtSignature }
+          : { functionCall: p.functionCall };
+      }
       if (p.functionResponse) {
         return {
           functionResponse: {
@@ -96,7 +101,9 @@ export function stripMediaForSnapshot(contents) {
           },
         };
       }
-      if (p.text !== undefined) return { text: p.text };
+      if (p.text !== undefined) {
+        return p.thoughtSignature ? { text: p.text, thoughtSignature: p.thoughtSignature } : { text: p.text };
+      }
       return { text: "" };
     }),
   }));
@@ -111,7 +118,23 @@ export function approvalButtons(approvalId) {
   };
 }
 
-export function approvalPromptText(toolName, args) {
+const escapeHtml = (s) => String(s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+
+// reason = teks yang ditulis model di langkah yang sama (mis. hasil review), supaya
+// user memutuskan dengan informasi lengkap, bukan cuma nama tool + argumen.
+export function approvalPromptText(toolName, args, reason = "") {
   const argPreview = JSON.stringify(args || {}, null, 1).slice(0, 800);
-  return `cocoa mau jalanin tool berisiko nih wkwk\n\ntool: <b>${toolName}</b>\nargumen:\n<pre>${argPreview.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))}</pre>\n\nlanjut atau batalin?`;
+  const why = String(reason || "").trim();
+  const whyBlock = why ? `alasan:\n${escapeHtml(why.length > 700 ? why.slice(0, 700) + "…" : why)}\n\n` : "";
+  return `cocoa mau jalanin tool berisiko nih wkwk\n\n${whyBlock}tool: <b>${toolName}</b>\nargumen:\n<pre>${escapeHtml(argPreview)}</pre>\n\nlanjut atau batalin?`;
+}
+
+// Merge hanya boleh setelah diff PR yang sama dibaca di langkah SEBELUMNYA (bukan
+// paralel di langkah yang sama), agar keputusan merge berdasar review yang sudah ada.
+export function prDiffReviewedBefore(priorContents, args = {}) {
+  const want = String(args.pull_number ?? "");
+  return (priorContents || []).some((c) => c.role === "model" && (c.parts || []).some((p) =>
+    p.functionCall?.name === "getPRDiff"
+    && String(p.functionCall.args?.pull_number ?? "") === want
+    && (!args.repo || !p.functionCall.args?.repo || p.functionCall.args.repo === args.repo)));
 }

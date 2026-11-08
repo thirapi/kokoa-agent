@@ -13,7 +13,7 @@ function captureApproval() {
   return {
     box,
     saveSnapshot: async (id, snapshot) => { box.id = id; box.snapshot = snapshot; },
-    notifyApproval: async ({ id, tool, toolArgs }) => { box.id = id; box.tool = tool; box.toolArgs = toolArgs; },
+    notifyApproval: async ({ id, tool, toolArgs, reason }) => { box.id = id; box.tool = tool; box.toolArgs = toolArgs; box.reason = reason || ''; },
   };
 }
 
@@ -61,7 +61,7 @@ export async function executeRemoteJob(job, platformEnv, { runtime = "vercel" } 
     data.filesModified = result.filesModified ?? null;
   } catch (err) {
     if (err instanceof ApprovalPending || err?.message === "__APPROVAL_PENDING__") {
-      data.approval = { id: cap.box.id, snapshot: cap.box.snapshot, tool: cap.box.tool, toolArgs: cap.box.toolArgs || {} };
+      data.approval = { id: cap.box.id, snapshot: cap.box.snapshot, tool: cap.box.tool, toolArgs: cap.box.toolArgs || {}, reason: cap.box.reason || '' };
     } else {
       console.error(`[${runtime}] agent loop error:`, err);
       data.error = String(err?.message || err);

@@ -69,7 +69,9 @@ describe("executeRemoteJob", () => {
   });
 
   it("tool berisiko -> hasil berisi approval (snapshot runtime 'vercel'), bukan error", async () => {
-    fetchGeminiGenerate.mockResolvedValueOnce(call("mergePullRequest", { owner: "thirapi", repo: "x", pull_number: 3 }));
+    fetchGeminiGenerate
+      .mockResolvedValueOnce(call("getPRDiff", { owner: "thirapi", repo: "x", pull_number: 3 }))
+      .mockResolvedValueOnce(call("mergePullRequest", { owner: "thirapi", repo: "x", pull_number: 3 }));
     const data = await executeRemoteJob(job(), platform);
     expect(data.error).toBeNull();
     expect(data.approval).toMatchObject({ tool: "mergePullRequest", snapshot: { runtime: "vercel", chatId: "7" } });
@@ -77,7 +79,9 @@ describe("executeRemoteJob", () => {
   });
 
   it("resume setelah ✅: tool yang di-approve dijalankan lalu loop lanjut", async () => {
-    fetchGeminiGenerate.mockResolvedValueOnce(call("mergePullRequest", { owner: "thirapi", repo: "x", pull_number: 3 }));
+    fetchGeminiGenerate
+      .mockResolvedValueOnce(call("getPRDiff", { owner: "thirapi", repo: "x", pull_number: 3 }))
+      .mockResolvedValueOnce(call("mergePullRequest", { owner: "thirapi", repo: "x", pull_number: 3 }));
     const first = await executeRemoteJob(job(), platform);
     fetchGeminiGenerate.mockResolvedValueOnce(text("PR udah di-merge"));
     const data = await executeRemoteJob({ chatId: 7, workerUrl: "https://worker.test", secrets: job().secrets,

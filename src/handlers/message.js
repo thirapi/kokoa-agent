@@ -14,7 +14,7 @@ import { detectScope, extractLatestUserText, recentUserTexts, isRepoTool } from 
 import { resolveAgentMode } from "../agent/mode.js";
 import { chooseRuntime, shouldRetryRemote } from "../agent/route.js";
 import {
-  needsApproval, toolCallKey, ApprovalPending,
+  needsApproval, toolCallKey, ApprovalPending, prDiffReviewedBefore,
   saveApproval, stripMediaForSnapshot, approvalButtons, approvalPromptText,
 } from "../agent/approval.js";
 import { getValidModelsForProvider } from "../agent/models-discovery.js";
@@ -159,6 +159,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
   if (resume && !startTime) startTime = Date.now();
   // Resume: eksekusi/tolak pending tool call DULU sebelum loop lanjut,
   // karena model tidak akan mengulang functionCall yang sudah ada di contents.
+  let grantedToolFailure = null;
   if (resume?.pendingTool && !resume.settledPending) {
     resume.settledPending = true;
     const { tool: pTool, args: pArgs, key: pKey } = resume.pendingTool;
@@ -167,6 +168,11 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
       console.log(`[Approval] Executing granted tool ${pTool} on resume`);
       const res = await runHarnessToolCall(pTool, pArgs || {}, env, chatId, toolCache, { toolExecutor: execTool });
       pResult = res.ok ? res.result : { error: res.error };
+      if (!res.ok) {
+        const perm = /\b(403|404)\b|Resource not accessible|Must have admin rights/i.test(res.error)
+          ? " (kemungkinan akun bot tidak punya izin write di repo ini)" : "";
+        grantedToolFailure = `⚠️ ${pTool} yang kamu setujui GAGAL dijalankan: ${String(res.error).slice(0, 200)}${perm}`;
+      }
       if (modifiesRepoFiles(pTool)) filesModified = true;
     } else {
       console.log(`[Approval] Denied tool ${pTool} on resume`);
@@ -470,6 +476,11 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
             console.warn(`[Scope Blocked]: ${name} (pesan terakhir umum, bukan tugas repo)`);
             return { error: `pesan terakhir user adalah permintaan umum, bukan tugas kode/repo — tool "${name}" diblokir. kerjakan HANYA permintaan terakhir user; jangan lanjutkan tugas lama dari riwayat chat. kalau user memang mau tugas repo/kode, minta mereka menyatakannya eksplisit.` };
           }
+          // Jangan minta izin merge sebelum review: diff harus sudah dibaca di langkah sebelumnya.
+          if (name === 'mergePullRequest' && !prDiffReviewedBefore(currentContents.slice(0, -1), args || {})) {
+            console.warn(`[Merge Guard] merge PR ${args?.pull_number} ditolak: belum ada review`);
+            return { error: "merge ditahan: baca diff PR ini dulu dengan getPRDiff (langkah terpisah, JANGAN paralel dengan merge), tulis review-nya ke user, lalu panggil mergePullRequest HANYA kalau review menyimpulkan aman/approve. kalau ada bug/masalah, JANGAN merge — laporkan temuannya." };
+          }
           // Approval gate: tool berisiko tinggi wajib dikonfirmasi user dulu (mode build)
           const tKey = toolCallKey(name, args || {});
           if (resume?.grantedKey && resume.grantedKey === tKey && !resume.consumedGrant) {
@@ -502,13 +513,14 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
                   await saveApproval(env, id, { status: 'pending', snapshot: snap });
                 });
                 await saveSnapshot(approvalId, snapshot);
-                const notify = options.notifyApproval || (async ({ id, tool, toolArgs }) => {
+                const notify = options.notifyApproval || (async ({ id, tool, toolArgs, reason }) => {
                   await sendTelegramMessage(
                     env.TELEGRAM_BOT_TOKEN, chatId,
-                    approvalPromptText(tool, toolArgs), approvalButtons(id)
+                    approvalPromptText(tool, toolArgs, reason), approvalButtons(id)
                   );
                 });
-                await notify({ id: approvalId, tool: name, toolArgs: args || {} });
+                const reason = parts.map((p) => p.text).filter(Boolean).join("\n");
+                await notify({ id: approvalId, tool: name, toolArgs: args || {}, reason });
                 throw new ApprovalPending(approvalId);
               }
             }
@@ -604,6 +616,10 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
   // tersimpan ke history (Worker) maupun snapshot approval (Spaces) — kalau bocor,
   // sesi-sesi berikutnya terus ngomongin kode walau user cuma minta foto.
   currentContents = currentContents.filter(c => !c._selfReflection);
+  // Kegagalan tool yang sudah disetujui user tidak boleh tenggelam di jawaban model.
+  if (grantedToolFailure) {
+    finalText = finalText ? `${grantedToolFailure}\n\n${finalText}` : grantedToolFailure;
+  }
   return { finalText, escalationTriggered, contents: currentContents, filesModified, iterations: iteration };
 }
 

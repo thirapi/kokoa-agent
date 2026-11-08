@@ -19,7 +19,7 @@ export async function sendApprovalPrompt(env, chatId, approval) {
     }).catch(() => {});
   }
   const sent = await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId,
-    approvalPromptText(approval.tool, approval.toolArgs), approvalButtons(approval.id));
+    approvalPromptText(approval.tool, approval.toolArgs, approval.reason), approvalButtons(approval.id));
   const mid = Array.isArray(sent) ? sent[sent.length - 1]?.message_id : null;
   if (mid) await env.CHAT_HISTORY.put(`last_approval_msg:${chatId}`, String(mid), { expirationTtl: 3600 });
 }

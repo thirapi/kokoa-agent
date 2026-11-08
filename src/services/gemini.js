@@ -104,15 +104,28 @@ const approvalHint =
   "LANGSUNG EKSEKUSI tanpa tanya opsi lagi. " +
   "Jangan ulangi pertanyaan klarifikasi yang sudah dijawab di history percakapan.";
 
+// Gemini 3 menolak (400) functionCall tanpa thoughtSignature. Signature asli dibawa
+// apa adanya; yang hilang (call buatan provider lain saat fallback, atau snapshot lama)
+// diisi sentinel resmi Google. Pada call paralel, hanya call pertama per giliran
+// model yang wajib bersignature.
+export const SKIP_THOUGHT_SIGNATURE = "skip_thought_signature_validator";
+
+export function prepareGeminiContents(contents) {
+  return (contents || []).map((c) => {
+    if (c.role === "function") return { ...c, role: "user" };
+    if (c.role !== "model" || !Array.isArray(c.parts)) return c;
+    const firstCall = c.parts.findIndex((p) => p.functionCall);
+    if (firstCall === -1 || c.parts[firstCall].thoughtSignature) return c;
+    const parts = c.parts.slice();
+    parts[firstCall] = { ...parts[firstCall], thoughtSignature: SKIP_THOUGHT_SIGNATURE };
+    return { ...c, parts };
+  });
+}
+
 export async function fetchGeminiGenerate(model, key, contents, env, chatId) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
 
-  const sanitizedContents = contents.map(c => {
-    if (c.role === "function") {
-      return { ...c, role: "user" };
-    }
-    return c;
-  });
+  const sanitizedContents = prepareGeminiContents(contents);
 
   const wibTime = new Date().toLocaleString("id-ID", {
     timeZone: "Asia/Jakarta",
