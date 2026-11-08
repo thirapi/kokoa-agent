@@ -356,6 +356,17 @@ async function youtubeOEmbed(videoId) {
   }
 }
 
+// URL hasil youtubeMp3 (host sama dengan MP3_CONVERTER_URL) -> dikirim dengan upload.
+export function isMp3ConverterUrl(url, env) {
+  const base = (env && env.MP3_CONVERTER_URL) || (typeof process !== "undefined" && process.env?.MP3_CONVERTER_URL) || "";
+  if (!base || !url) return false;
+  try {
+    return new URL(url).host === new URL(base).host;
+  } catch {
+    return false;
+  }
+}
+
 export async function youtubeMp3(query, env) {
   const envOf = (k) => (env && env[k]) || (typeof process !== "undefined" && process.env?.[k]) || null;
   const base = envOf("MP3_CONVERTER_URL");

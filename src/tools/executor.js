@@ -1,7 +1,7 @@
 import { callGitHubAPI } from "../services/github.js";
 import { bufferToBase64 } from "../utils/array.js";
-import { webSearch, webFetch, imageSearch, songSearch, youtubeSearch, freeMusicSearch, youtubeMp3 } from "../services/search.js";
-import { sendTelegramPhoto, sendTelegramAudio, getTelegramUserInfo } from "../services/telegram.js";
+import { webSearch, webFetch, imageSearch, songSearch, youtubeSearch, freeMusicSearch, youtubeMp3, isMp3ConverterUrl } from "../services/search.js";
+import { sendTelegramPhoto, sendTelegramAudio, sendTelegramAudioUpload, getTelegramUserInfo } from "../services/telegram.js";
 import {
   getTrelloBoard,
   getTrelloLists,
@@ -299,6 +299,9 @@ export async function executeTool(name, args, env, chatId) {
     }
     case "sendAudio": {
       if (!env.TELEGRAM_BOT_TOKEN) return { error: "Token Telegram tidak tersedia." };
+      if (isMp3ConverterUrl(args.audioUrl, env)) {
+        return await sendTelegramAudioUpload(env.TELEGRAM_BOT_TOKEN, chatId, args.audioUrl, args.performer || "", args.title || "", args.caption || "");
+      }
       return await sendTelegramAudio(env.TELEGRAM_BOT_TOKEN, chatId, args.audioUrl, args.performer || "", args.title || "", args.caption || "");
     }
     case "inspectTelegramUser": {

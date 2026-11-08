@@ -176,6 +176,47 @@ export async function sendTelegramAudio(token, chatId, audioUrl, performer = "",
   return data.result || { ok: true };
 }
 
+// Unduh audio sendiri lalu upload ke Telegram (multipart), bukan menyuruh Telegram
+// mengambil URL. Dipakai untuk file dari konverter MP3 pribadi: domain konverter bisa
+// punya IP edge yang menolak sebagian klien (error 1034), dan batas via URL cuma 20 MB
+// sedangkan upload 50 MB. Dari Worker, fetch ke domain Cloudflare tidak lewat IP itu.
+export const TG_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+
+export async function sendTelegramAudioUpload(token, chatId, audioUrl, performer = "", title = "", caption = "") {
+  const src = await fetch(audioUrl, { signal: AbortSignal.timeout(20000) });
+  if (!src.ok) {
+    const detail = (await src.text().catch(() => "")).slice(0, 150);
+    throw new Error(`unduh audio gagal (HTTP ${src.status}) ${detail}`.trim());
+  }
+  const declared = Number(src.headers.get("content-length") || 0);
+  if (declared > TG_UPLOAD_MAX_BYTES) throw new Error(`file ${Math.round(declared / 1e6)} MB melebihi batas 50 MB`);
+  const bytes = await src.arrayBuffer();
+  if (bytes.byteLength > TG_UPLOAD_MAX_BYTES) throw new Error(`file ${Math.round(bytes.byteLength / 1e6)} MB melebihi batas 50 MB`);
+
+  const filename = `${(title || "audio").replace(/[^\p{L}\p{N} ._-]+/gu, "").trim().slice(0, 80) || "audio"}.mp3`;
+  const send = async (html) => {
+    const form = new FormData();
+    form.append("chat_id", String(chatId));
+    form.append("audio", new Blob([bytes], { type: src.headers.get("content-type") || "audio/mpeg" }), filename);
+    if (performer) form.append("performer", performer.slice(0, 200));
+    if (title) form.append("title", title.slice(0, 200));
+    if (caption) {
+      form.append("caption", (html ? caption : stripHtml(caption)).slice(0, 1000));
+      if (html) form.append("parse_mode", "HTML");
+    }
+    // Tanpa retry otomatis saat timeout: upload yang sebenarnya sampai bisa terkirim dobel.
+    return fetchWithTimeout(TG_API(token, "sendAudio"), { method: "POST", body: form }, 30000);
+  };
+  let res = await send(true);
+  if (!res.ok && caption) res = await send(false);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`sendAudio (upload) gagal (${res.status}): ${errText.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  return data.result || { ok: true };
+}
+
 export async function editTelegramMessage(token, chatId, messageId, htmlText) {
   const url = TG_API(token, "editMessageText");
   const payload = {

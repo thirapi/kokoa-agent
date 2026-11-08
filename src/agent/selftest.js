@@ -97,6 +97,15 @@ export async function runSelftest(env, { deep = false, features = false } = {}) 
       }, 40000));
     }
   }
+  // Opsional: konverter jalan di komputer pribadi, boleh mati — tidak membuat selftest gagal.
+  if (features && env.MP3_CONVERTER_URL) {
+    checks.push(check("feature:mp3Converter (opsional)", async () => {
+      const r = await fetch(env.MP3_CONVERTER_URL.replace(/\/+$/, "") + "/health", { signal: AbortSignal.timeout(10000) });
+      const body = await r.text();
+      if (!r.ok) throw new Error(`HTTP ${r.status} ${body.slice(0, 80)}`);
+      return `online dari Worker (${body.slice(0, 60)})`;
+    }).then((res) => ({ ...res, optional: true })));
+  }
   if (deep) {
     // Satu panggilan LLM kecil lewat rotasi provider sungguhan (memakai sedikit kuota).
     checks.push(check("llm:roundtrip", async () => {
@@ -117,5 +126,5 @@ export async function runSelftest(env, { deep = false, features = false } = {}) 
     }, 60000));
   }
   const results = await Promise.all(checks);
-  return { ok: results.every((r) => r.ok), results };
+  return { ok: results.every((r) => r.ok || r.optional), results };
 }
