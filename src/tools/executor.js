@@ -27,6 +27,8 @@ import {
   deleteReminder,
 } from "../db/index.js";
 
+import { withCoAuthor, coAuthorTrailer, ownerIdentity, withPrFooter } from "../utils/attribution.js";
+
 // Repo tempat workflow kokoa-dev.yml berada (penerima repository_dispatch).
 export function dispatchRepo(env) {
   return env?.GHA_DISPATCH_REPO || "thirapi/kokoa-agent";
@@ -78,8 +80,9 @@ export async function executeTool(name, args, env, chatId) {
         const bytes = new TextEncoder().encode(args.content);
         const base64Content = bufferToBase64(bytes);
         const body = {
-          message: args.message,
+          message: withCoAuthor(args.message, env),
           content: base64Content,
+          author: ownerIdentity(env),
         };
         if (sha) body.sha = sha;
         if (args.branch) body.branch = args.branch;
@@ -102,7 +105,7 @@ export async function executeTool(name, args, env, chatId) {
         head: args.head,
         base: args.base,
       };
-      if (args.body) body.body = args.body;
+      body.body = withPrFooter(args.body);
       return callGitHubAPI(env, endpoint, "POST", body);
     }
     case "createBranch": {
@@ -123,7 +126,7 @@ export async function executeTool(name, args, env, chatId) {
     case "mergePullRequest": {
       const pull_number = parseInt(args.pull_number, 10);
       const endpoint = `repos/${args.owner}/${args.repo}/pulls/${pull_number}/merge`;
-      const body = {};
+      const body = { commit_message: coAuthorTrailer(env) };
       if (args.commit_title) body.commit_title = args.commit_title;
       if (args.merge_method) body.merge_method = args.merge_method;
       return callGitHubAPI(env, endpoint, "PUT", body);
@@ -170,8 +173,9 @@ export async function executeTool(name, args, env, chatId) {
     case "deleteFile": {
       const endpoint = `repos/${args.owner}/${args.repo}/contents/${args.path}`;
       const body = {
-        message: args.message,
+        message: withCoAuthor(args.message, env),
         sha: args.sha,
+        author: ownerIdentity(env),
       };
       if (args.branch) body.branch = args.branch;
       return callGitHubAPI(env, endpoint, "DELETE", body);

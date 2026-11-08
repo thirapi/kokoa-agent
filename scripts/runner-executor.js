@@ -5,6 +5,14 @@ import crypto from 'crypto';
 import { AgentSession } from './runner-gemini.js';
 import { webSearch, webFetch } from '../src/services/search.js';
 import { sanitizedChildEnv } from '../src/tools/spaces-executor.js';
+import { ownerIdentity, withCoAuthor, withPrFooter } from '../src/utils/attribution.js';
+
+// Atribusi ala Claude Code: commit atas nama pemilik, Cocoa sebagai co-author.
+const OWNER = ownerIdentity(process.env);
+function setGitIdentity() {
+  execFileSync('git', ['config', 'user.name', OWNER.name]);
+  execFileSync('git', ['config', 'user.email', OWNER.email]);
+}
 
 const {
   TARGET_REPO,
@@ -201,12 +209,11 @@ async function main() {
         execSync('git init');
         try { execSync('git checkout -b main'); } catch (e) { }
 
-        execSync('git config user.name "ccocoa"');
-        execSync('git config user.email "270871570+ccocoa@users.noreply.github.com"');
+        setGitIdentity();
 
         fs.writeFileSync('README.md', `# ${TARGET_REPO}\n\nRepository automatically created by Kokoa Dev Agent.`);
         execSync('git add README.md');
-        execSync('git commit -m "chore: initial commit"');
+        execFileSync('git', ['commit', '-m', withCoAuthor('chore: initial commit', process.env)]);
 
         execSync(`gh repo create ${TARGET_REPO} --public --source=. --remote=origin --push`);
         await sendTelegramUpdate(`repo \`${TARGET_REPO}\` udah berhasil dibuat! lanjut ngerjain instruksinya ya...`);
@@ -215,8 +222,7 @@ async function main() {
       }
     }
 
-    execSync('git config user.name "ccocoa"');
-    execSync('git config user.email "270871570+ccocoa@users.noreply.github.com"');
+    setGitIdentity();
 
     if (!isAnalysisMode) {
       const originCheck = execSync('git config --get remote.origin.url', { encoding: 'utf8' }).trim();
@@ -387,9 +393,7 @@ async function main() {
 
     if (status.trim()) {
       const { commitMessage, prTitle, prBody } = result;
-      const commitMsg = commitMessage
-        ? `${commitMessage}\n\nCo-authored-by: thirapi <132630759+thirapi@users.noreply.github.com>`
-        : `feat: update\n\nCo-authored-by: thirapi <132630759+thirapi@users.noreply.github.com>`;
+      const commitMsg = withCoAuthor(commitMessage || 'feat: update', process.env);
 
       const originUrl = execSync('git config --get remote.origin.url', { encoding: 'utf8' }).trim();
       const authUrl = buildAuthUrl(originUrl, GLOBAL_WORKER_PAT);
@@ -422,7 +426,7 @@ async function main() {
         execFileSync('git', ['commit', '-m', commitMsg]);
         execSync(`git push ${authUrl} ${branchName}`, { stdio: 'pipe' });
 
-        const finalPrBody = prBody || `**Kokoa Dev Agent Report**\n\n**Original Instruction:**\n${safeInstruction}`;
+        const finalPrBody = withPrFooter(prBody || `**Kokoa Dev Agent Report**\n\n**Original Instruction:**\n${safeInstruction}`);
         const prUrl = execFileSync('gh', [
           'pr', 'create',
           '--title', prTitle || branchName.replace(/^kokoa\//, ''),

@@ -86,6 +86,27 @@ async function pollSpacesResults(env, ctx) {
   }
 }
 
+// Akun bot (pemilik GITHUB_PAT_TOKEN) otomatis menerima undangan collaborator —
+// HANYA dari pemilik (OWNER_GITHUB_LOGIN, default thirapi). Undangan lain diabaikan.
+export async function acceptOwnerInvitations(env) {
+  if (!env.GITHUB_PAT_TOKEN) return [];
+  const { callGitHubAPI } = await import("../services/github.js");
+  const owner = String(env.OWNER_GITHUB_LOGIN || "thirapi").toLowerCase();
+  const invites = await callGitHubAPI(env, "user/repository_invitations");
+  const accepted = [];
+  for (const inv of Array.isArray(invites) ? invites : []) {
+    if (String(inv?.inviter?.login || "").toLowerCase() !== owner) continue;
+    try {
+      await callGitHubAPI(env, `user/repository_invitations/${inv.id}`, "PATCH");
+      accepted.push(inv.repository?.full_name || String(inv.id));
+    } catch (e) {
+      console.error(`[Cron] gagal menerima undangan ${inv.id}:`, e.message);
+    }
+  }
+  if (accepted.length) console.log(`[Cron] undangan diterima: ${accepted.join(", ")}`);
+  return accepted;
+}
+
 export async function handleCron(event, env, ctx) {
   // 1. Handle reminders
   const now = Math.floor(Date.now() / 1000);
@@ -115,4 +136,10 @@ export async function handleCron(event, env, ctx) {
 
   // 2. Poll Spaces for pending results (fallback for short-poll failures)
   await pollSpacesResults(env, ctx);
+
+  // 3. Tiap 15 menit: terima undangan repo dari pemilik.
+  const minute = new Date(event?.scheduledTime || Date.now()).getUTCMinutes();
+  if (minute % 15 === 0) {
+    await acceptOwnerInvitations(env).catch((e) => console.error("[Cron] cek undangan gagal:", e.message));
+  }
 }
