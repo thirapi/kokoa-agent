@@ -4,6 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { AgentSession } from './runner-gemini.js';
 import { webSearch, webFetch } from '../src/services/search.js';
+import { sanitizedChildEnv } from '../src/tools/spaces-executor.js';
 
 const {
   TARGET_REPO,
@@ -14,7 +15,13 @@ const {
   WORKER_URL,
   CONTEXT_ID,
   MODE,
+  RUNNER_SECRET,
 } = process.env;
+
+if (!RUNNER_SECRET) {
+  console.error('RUNNER_SECRET belum diset — callback ke Worker akan ditolak (401).');
+}
+const RUNNER_AUTH = `Bearer ${RUNNER_SECRET || ''}`;
 
 const isAnalysisMode = MODE === "analysis";
 
@@ -34,14 +41,21 @@ function redactSecrets(value) {
   }
 }
 
+// Penanda bahwa hasil akhir sudah dilaporkan — dibaca langkah "Notify failure"
+// di workflow agar user tidak dapat dua pesan gagal untuk satu run.
+const REPORTED_MARKER = path.join(process.env.RUNNER_TEMP || '/tmp', 'kokoa-reported');
+
 async function workerCallback(type, data) {
   if (!WORKER_URL) return;
+  if (type === 'workflow_result' || type === 'analysis_result') {
+    try { fs.writeFileSync(REPORTED_MARKER, type); } catch (_) {}
+  }
   try {
     await fetch(`${WORKER_URL}/api/runner-callback`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: "Bearer kokoa-runner-secret",
+        Authorization: RUNNER_AUTH,
       },
       body: JSON.stringify({ chat_id: CHAT_ID, type, data: redactSecrets(data) }),
     });
@@ -97,7 +111,7 @@ async function fetchContext() {
   if (!WORKER_URL || !CONTEXT_ID) return null;
   try {
     const res = await fetch(`${WORKER_URL}/api/context/${CONTEXT_ID}`, {
-      headers: { Authorization: 'Bearer kokoa-runner-secret' },
+      headers: { Authorization: RUNNER_AUTH },
     });
     if (!res.ok) return null;
     return await res.json();
@@ -335,7 +349,8 @@ async function main() {
         }
 
         try {
-          const output = execSync(command, { encoding: 'utf8', stdio: 'pipe', timeout: 60000 });
+          // env tanpa secret: perintah buatan model tidak boleh bisa membaca token
+          const output = execSync(command, { encoding: 'utf8', stdio: 'pipe', timeout: 60000, env: sanitizedChildEnv() });
           return `[SUCCESS]\n${output}`;
         } catch (error) {
           return `[ERROR]\nstdout: ${error.stdout || ''}\nstderr: ${error.stderr || ''}`;

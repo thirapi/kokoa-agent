@@ -43,6 +43,13 @@ const REPO_TOOLS = new Set([
   'triggerDeveloperWorkflow', 'checkWorkflowStatus',
 ]);
 
+export function hasRepoSignal(text) {
+  const t = String(text || '').toLowerCase();
+  if (!t) return false;
+  if (REPO_SIGNALS.some(k => t.includes(k))) return true;
+  return REPO_PATH_PATTERN.test(t) && REPO_PATH_CONTEXT.some(k => t.includes(k));
+}
+
 export function isRepoTool(name) {
   return REPO_TOOLS.has(name);
 }

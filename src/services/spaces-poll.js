@@ -1,4 +1,8 @@
 
+import { runnerAuthHeaders } from "../utils/auth.js";
+import { cleanContentsForHistory } from "../utils/history.js";
+import { MAX_HISTORY } from "../config.js";
+
 export async function handleSpacesResult(env, chatId, data, progressMsgId) {
   const { addHistory, trimHistory, removePendingSpace, releaseChatLock } = await import("../db/index.js");
   const { sendTelegramMessage, deleteTelegramMessage, sendTelegramPhoto, sendTelegramAudio } = await import("../services/telegram.js");
@@ -10,20 +14,8 @@ export async function handleSpacesResult(env, chatId, data, progressMsgId) {
   try {
     // historySynced = Spaces sudah sync riwayat via callback; jangan simpan dua kali
     if (data.newContent && data.newContent.length > 0 && !data.historySynced) {
-      const cleaned = data.newContent.map(c => ({
-        role: c.role,
-        parts: c.parts.map(p => {
-          if (p.inline_data) return { text: `[Media: ${p.inline_data.mime_type}]` };
-          const cp = {};
-          if (p.text !== undefined) cp.text = p.text;
-          if (Object.keys(cp).length > 0) return cp;
-          if (p.functionCall) return { text: `[FunctionCall: ${p.functionCall.name}]` };
-          if (p.functionResponse) return { text: `[FunctionResponse: ${p.functionResponse.name}]` };
-          return { text: '' };
-        }).filter(p => p.text || Object.keys(p).length > 0)
-      }));
-      await addHistory(env, chatId, cleaned);
-      await trimHistory(env, chatId, 15);
+      await addHistory(env, chatId, cleanContentsForHistory(data.newContent));
+      await trimHistory(env, chatId, MAX_HISTORY);
     }
     console.log(`[SpacesResult] Step1: addHistory done for ${chatId}`);
   } catch (e) { console.error(`[SpacesResult] Step1 FAIL (addHistory):`, e.message); }
@@ -119,7 +111,11 @@ export async function handleSpacesResult(env, chatId, data, progressMsgId) {
   }
 
   try {
-    await fetch(`${env.HF_SPACES_URL}/api/result?chatId=${chatId}`, { method: 'DELETE' });
+    await fetch(`${env.HF_SPACES_URL}/api/result?chatId=${encodeURIComponent(chatId)}`, {
+      method: 'DELETE',
+      headers: runnerAuthHeaders(env),
+      signal: AbortSignal.timeout(10000),
+    });
   } catch (_) {}
 
   await env.CHAT_HISTORY.put(`callback_done:${chatId}`, "1", { expirationTtl: 300 }).catch(() => {});
@@ -143,7 +139,8 @@ export async function pollSpacesResult(env, chatId, progressMsgId) {
     }
 
     try {
-      const res = await fetch(`${env.HF_SPACES_URL}/api/result/${chatId}`, {
+      const res = await fetch(`${env.HF_SPACES_URL}/api/result/${encodeURIComponent(chatId)}`, {
+        headers: runnerAuthHeaders(env),
         signal: AbortSignal.timeout(15000),
       });
       const data = await res.json();

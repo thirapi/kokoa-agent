@@ -2,8 +2,12 @@ FROM node:20-slim
 
 WORKDIR /app
 
+# git dibutuhkan tool cloneRepo; dipasang saat build, bukan saat container start.
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY package.json package-lock.json* ./
-RUN npm install --production
+RUN npm ci --omit=dev
 
 COPY . .
 

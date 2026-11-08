@@ -1,0 +1,152 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("../src/db/index.js", () => ({
+  updateTaskStatus: vi.fn(), setMemory: vi.fn(), deleteMemoriesByPrefix: vi.fn(),
+  getGHAContext: vi.fn(async () => ({ id: "ctx1", instruction: "do it" })),
+  consumeGHAContext: vi.fn(), getMemory: vi.fn(async () => "val"), saveGHAContext: vi.fn(),
+  getHistory: vi.fn(async () => [{ role: "user", parts: [{ text: "hi" }] }]),
+  addHistory: vi.fn(), trimHistory: vi.fn(),
+}));
+
+import * as db from "../src/db/index.js";
+import { handleAPI } from "../src/handlers/api.js";
+import worker from "../src/index.js";
+import { baseEnv, fakeCtx, req, bearer } from "./helpers.js";
+import { MAX_HISTORY } from "../src/config.js";
+
+const PROTECTED = [
+  ["POST", "/api/runner-callback"],
+  ["POST", "/api/spaces-callback"],
+  ["GET", "/api/context/abc"],
+  ["PUT", "/api/context/abc"],
+  ["POST", "/api/memory"],
+  ["GET", "/api/memory/1/key"],
+  ["POST", "/api/approval-store"],
+  ["POST", "/api/ai-proxy/v1beta/models"],
+  ["POST", "/api/telegram-proxy/sendMessage"],
+  ["GET", "/api/history/123"],
+];
+
+let fetchMock;
+beforeEach(() => {
+  vi.clearAllMocks();
+  fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+  vi.stubGlobal("fetch", fetchMock);
+});
+
+const call = (path, opts) => handleAPI(req(path, opts), baseEnv(), fakeCtx());
+
+describe("auth semua endpoint /api/*", () => {
+  it("/api/health publik", async () => {
+    const res = await call("/api/health");
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("ok");
+  });
+
+  it.each(PROTECTED)("%s %s menolak tanpa token", async (method, path) => {
+    const res = await call(path, { method, body: method === "GET" ? undefined : {} });
+    expect(res.status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(PROTECTED)("%s %s menolak token lama yang bocor", async (method, path) => {
+    const res = await call(path, { method, auth: "Bearer kokoa-runner-secret", body: method === "GET" ? undefined : {} });
+    expect(res.status).toBe(401);
+  });
+
+  it("menolak semuanya bila RUNNER_SECRET belum diset di Worker", async () => {
+    const env = baseEnv({ RUNNER_SECRET: undefined });
+    const res = await handleAPI(req("/api/history/1", { auth: "Bearer " }), env, fakeCtx());
+    expect(res.status).toBe(401);
+  });
+
+  it("endpoint tak dikenal (termasuk web-chat lama) -> 404 untuk pemegang token, 401 untuk publik", async () => {
+    expect((await call("/api/web-chat/send", { method: "POST", body: { message: "hi" } })).status).toBe(401);
+    expect((await call("/api/web-chat/send", { method: "POST", auth: bearer(), body: { message: "hi" } })).status).toBe(404);
+  });
+});
+
+describe("/api/spaces-callback", () => {
+  it("menyimpan riwayat yang sudah dibersihkan lalu trim", async () => {
+    const res = await call("/api/spaces-callback", {
+      method: "POST", auth: bearer(),
+      body: { chatId: 42, isFinal: true, newContents: [
+        { role: "user", parts: [{ text: "halo" }, { inline_data: { mime_type: "image/png", data: "xx" } }] },
+        { role: "model", parts: [{ functionCall: { name: "webSearch", args: {} } }] },
+      ] },
+    });
+    expect(res.status).toBe(200);
+    expect(db.addHistory).toHaveBeenCalledWith(expect.anything(), "42", [
+      { role: "user", parts: [{ text: "halo" }, { text: "[Media: image/png]" }] },
+      { role: "model", parts: [{ text: "[FunctionCall: webSearch]" }] },
+    ]);
+    expect(db.trimHistory).toHaveBeenCalledWith(expect.anything(), "42", MAX_HISTORY);
+  });
+
+  it("tanpa newContents tidak menulis apa pun", async () => {
+    const res = await call("/api/spaces-callback", { method: "POST", auth: bearer(), body: { chatId: "1" } });
+    expect(res.status).toBe(200);
+    expect(db.addHistory).not.toHaveBeenCalled();
+  });
+
+  it("validasi chatId & method", async () => {
+    expect((await call("/api/spaces-callback", { method: "POST", auth: bearer(), body: {} })).status).toBe(400);
+    expect((await call("/api/spaces-callback", { method: "GET", auth: bearer() })).status).toBe(405);
+  });
+});
+
+describe("/api/runner-callback", () => {
+  it("workflow_result gagal -> simpan memori & kabari user", async () => {
+    const res = await call("/api/runner-callback", {
+      method: "POST", auth: bearer(),
+      body: { chat_id: "7", type: "workflow_result", data: { status: "failed", error: "boom" } },
+    });
+    expect(res.status).toBe(200);
+    expect(db.setMemory).toHaveBeenCalledWith(expect.anything(), "7", "workflow_status", "failed");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain("api.telegram.org/bot000:TEST/sendMessage");
+    expect(JSON.parse(init.body)).toMatchObject({ chat_id: "7", text: expect.stringContaining("boom") });
+  });
+
+  it("tipe tak dikenal -> 400", async () => {
+    const res = await call("/api/runner-callback", { method: "POST", auth: bearer(), body: { chat_id: "7", type: "zzz", data: {} } });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("/api/ai-proxy", () => {
+  it("menolak host di luar allowlist", async () => {
+    const res = await call("/api/ai-proxy/x", { method: "POST", auth: bearer(), headers: { "x-target-host": "169.254.169.254" }, body: {} });
+    expect(res.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("meneruskan query string ke host AI yang diizinkan", async () => {
+    const res = await call("/api/ai-proxy/v1beta/models/m:generateContent?key=K", {
+      method: "POST", auth: bearer(), headers: { "x-target-host": "generativelanguage.googleapis.com" }, body: { a: 1 },
+    });
+    expect(res.status).toBe(200);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://generativelanguage.googleapis.com/v1beta/models/m:generateContent?key=K");
+  });
+});
+
+describe("/api/context (GHA runner)", () => {
+  it("mengembalikan & mengonsumsi context", async () => {
+    const res = await call("/api/context/ctx1", { auth: bearer() });
+    expect(res.status).toBe(200);
+    expect((await res.json()).id).toBe("ctx1");
+    expect(db.consumeGHAContext).toHaveBeenCalledWith(expect.anything(), "ctx1");
+  });
+});
+
+describe("router utama (src/index.js)", () => {
+  it("GET / tidak lagi menyajikan web UI", async () => {
+    const res = await worker.fetch(req("/"), baseEnv(), fakeCtx());
+    expect(res.status).toBe(405);
+  });
+
+  it("/api/* diarahkan ke handleAPI", async () => {
+    const res = await worker.fetch(req("/api/health"), baseEnv(), fakeCtx());
+    expect(res.status).toBe(200);
+  });
+});

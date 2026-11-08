@@ -4,9 +4,25 @@ on:
   repository_dispatch:
     types: [kokoa-dev-task]
 
+# Satu task per repo target dalam satu waktu: dua task ke repo yang sama
+# bisa bentrok di branch/PR yang sama. Task berikutnya antre, tidak dibatalkan.
+concurrency:
+  group: kokoa-dev-${{ github.event.client_payload.target_repo }}
+  cancel-in-progress: false
+
 jobs:
   execute-task:
     runs-on: ubuntu-latest
+    # Default GitHub 6 jam; agent yang macet tidak boleh menggantung selama itu.
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      # URL Worker dipatok dari repo variable bila ada; payload hanya cadangan.
+      WORKER_URL: ${{ vars.WORKER_URL || github.event.client_payload.worker_url }}
+      CHAT_ID: ${{ github.event.client_payload.chat_id }}
+      TARGET_REPO: ${{ github.event.client_payload.target_repo }}
+      RUNNER_SECRET: ${{ secrets.RUNNER_SECRET }}
     steps:
       - name: Checkout Command Center
         uses: actions/checkout@v4
@@ -14,16 +30,15 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 22
+          cache: npm
 
       - name: Install Dependencies
-        run: npm install
+        run: npm ci --omit=dev
 
       - name: Run Executor Script
         env:
-          TARGET_REPO: ${{ github.event.client_payload.target_repo }}
           INSTRUCTION: ${{ github.event.client_payload.instruction }}
-          CHAT_ID: ${{ github.event.client_payload.chat_id }}
           GLOBAL_WORKER_PAT: ${{ secrets.GLOBAL_WORKER_PAT }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           GEMINI_MODELS: ${{ vars.GEMINI_MODELS }}
@@ -31,7 +46,26 @@ jobs:
           GROQ_MODELS: ${{ vars.GROQ_MODELS }}
           AI_PROVIDERS: ${{ vars.AI_PROVIDERS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          WORKER_URL: ${{ github.event.client_payload.worker_url }}
           CONTEXT_ID: ${{ github.event.client_payload.context_id }}
           MODE: ${{ github.event.client_payload.mode }}
         run: node scripts/runner-executor.js
+
+      # Script di atas melapor sendiri bila error di dalam Node. Langkah ini menangkap
+      # kegagalan di luar itu (npm ci gagal, timeout 30 menit, run dibatalkan) supaya
+      # user di Telegram tetap dapat kabar dan tidak menunggu selamanya.
+      - name: Notify failure
+        if: failure() || cancelled()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          [ -n "$WORKER_URL" ] && [ -n "$CHAT_ID" ] || exit 0
+          # Script sudah melapor hasil akhirnya sendiri -> jangan kirim dobel.
+          [ -f "$RUNNER_TEMP/kokoa-reported" ] && exit 0
+          body=$(jq -n --arg c "$CHAT_ID" --arg r "$TARGET_REPO" \
+            --arg e "workflow GitHub Actions berhenti ($JOB_STATUS) sebelum selesai. log: $RUN_URL" \
+            '{chat_id: $c, type: "workflow_result", data: {status: "failed", repo: $r, error: $e}}')
+          curl -sS -m 20 -X POST "$WORKER_URL/api/runner-callback" \
+            -H "Authorization: Bearer $RUNNER_SECRET" \
+            -H "Content-Type: application/json" \
+            -d "$body" || true

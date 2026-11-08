@@ -12,6 +12,7 @@ import { runHarnessToolCall, isWriteTool, modifiesRepoFiles } from "../tools/har
 import { validateToolArgs, isReadOnlyTool } from "../agent/registry.js";
 import { detectScope, extractLatestUserText, recentUserTexts, isRepoTool } from "../agent/scope.js";
 import { resolveAgentMode } from "../agent/mode.js";
+import { chooseRuntime, shouldRetryOnSpaces } from "../agent/route.js";
 import {
   isHighRiskTool, toolCallKey, ApprovalPending,
   saveApproval, stripMediaForSnapshot, approvalButtons, approvalPromptText,
@@ -146,27 +147,9 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
     });
   }
 
-  // Throttle progress updates to avoid Telegram editMessageText rate limits
-  let lastProgressTime = 0;
-  const PROGRESS_THROTTLE_MS = 5000;
-  async function sendProgress(text) {
-    return; // disabled — uses cron polling instead
-    const now = Date.now();
-    if (now - lastProgressTime < PROGRESS_THROTTLE_MS) return;
-    lastProgressTime = now;
-    try {
-      await fetch(`${env.WORKER_URL}/api/spaces-callback`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer kokoa-runner-secret'
-        },
-        body: JSON.stringify({ chatId: String(chatId), progressText: text })
-      });
-    } catch (e) {
-      console.error("Failed to send progress callback:", e);
-    }
-  }
+  // Progress live dinonaktifkan (hasil dikirim via proxy/polling). Disimpan sebagai no-op
+  // agar pemanggil di bawah tidak perlu diubah.
+  async function sendProgress() {}
 
   function truncateToolResult(result, maxChars = 15000) {
     if (result === null || result === undefined) return result;
@@ -221,13 +204,24 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
 
   if (!startTime) startTime = Date.now();
 
+  // Penanda untuk pemanggil: boleh-tidaknya tugas diulang di runtime lain (Spaces)
+  // setelah Worker kehabisan waktu. Hanya aman kalau belum ada tool yang mengubah state.
+  let stateMutated = false;
+  const timeoutError = (cause) => {
+    const err = new Error(
+      "duh, sori ya prosesnya kelamaan nih, keburu kehabisan batas waktu. coba pecah pertanyaannya biar lebih simpel aja ya!",
+    );
+    err.code = 'EXECUTION_TIMEOUT';
+    err.stateMutated = stateMutated;
+    if (cause) err.cause = cause;
+    return err;
+  };
+
   while (iteration < MAX_AGENT_ITERATIONS) {
     iteration++;
 
     if (Date.now() - startTime > maxTime) {
-      throw new Error(
-        "duh, sori ya prosesnya kelamaan nih, keburu kehabisan batas waktu. coba pecah pertanyaannya biar lebih simpel aja ya!",
-      );
+      throw timeoutError();
     }
 
     let response = null;
@@ -389,6 +383,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
     }
 
     if (!response) {
+      if (Date.now() - startTime > maxTime) throw timeoutError(lastError);
       if (failedProviders.size >= providerConfigs.length) {
         throw lastError || new Error("duh, semua provider AI lagi error atau kena limit nih. coba beberapa saat lagi ya");
       }
@@ -488,6 +483,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
             }
           }
           console.log(`Executing Tool: ${name}`, args);
+          if (!isReadOnlyTool(name)) stateMutated = true;
           if (modifiesRepoFiles(name)) {
             filesModified = true;
           }
@@ -720,7 +716,9 @@ export async function processMessage(message, env) {
       return;
     }
 
-    if (env.HF_SPACES_URL) {
+    // Kirim ke HF Spaces. 'done' = Spaces menangani (atau sibuk); 'fallthrough' = gagal,
+    // pemanggil lanjut proses di Worker.
+    const runOnSpaces = async () => {
       try {
         const { sendTelegramMessage } = await import("../services/telegram.js");
         const sent = await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "Cocoa sedang bekerja... ⏳");
@@ -744,7 +742,7 @@ export async function processMessage(message, env) {
             console.warn(`[MsgLock] Polling Spaces gagal, fallback ke pemrosesan Worker langsung untuk chat ${chatId}`);
             shouldReleaseLock = true;
           } else {
-            return;
+            return 'done';
           }
         }
 
@@ -757,7 +755,7 @@ export async function processMessage(message, env) {
             await env.CHAT_HISTORY.delete(`progress_msg:${chatId}`).catch(() => {});
           }
           // shouldReleaseLock stays true → lock released in finally block
-          return;
+          return 'done';
         }
         // Sync atau unknown — hapus progress message
         if (progressMsgId) {
@@ -775,9 +773,15 @@ export async function processMessage(message, env) {
           await deleteTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, parseInt(pid)).catch(() => {});
           await env.CHAT_HISTORY.delete(`progress_msg:${chatId}`).catch(() => {});
         }
-        // JANGAN return — biarkan jatuh ke pemrosesan langsung via Worker di bawah
+        // Jatuh ke pemrosesan langsung via Worker
       }
-    }
+      return 'fallthrough';
+    };
+
+    const hasSpaces = !!env.HF_SPACES_URL;
+    const runtime = chooseRuntime({ hasSpaces, userPrompt, historyTexts: recentUserTexts(history, 3) });
+    console.log(`[Route] chat ${chatId} -> ${runtime}`);
+    if (runtime === 'spaces' && (await runOnSpaces()) === 'done') return;
 
     const providerConfigs = await buildProviderConfigs(env);
     if (providerConfigs.length === 0) {
@@ -792,10 +796,20 @@ export async function processMessage(message, env) {
     let currentContents = [...history, { role: "user", parts: userParts }];
     const startTime = Date.now();
 
-    const result = await runAgentLoop(
-      currentContents, env, chatId, userPrompt,
-      providerConfigs, history, startTime
-    );
+    let result;
+    try {
+      result = await runAgentLoop(
+        currentContents, env, chatId, userPrompt,
+        providerConfigs, history, startTime
+      );
+    } catch (err) {
+      // Worker kehabisan waktu & belum ada efek samping -> ulangi di Spaces (budget 240 detik).
+      if (runtime === 'worker' && shouldRetryOnSpaces(err, hasSpaces)) {
+        console.warn(`[Route] Worker timeout untuk chat ${chatId}, dialihkan ke Spaces`);
+        if ((await runOnSpaces()) === 'done') return;
+      }
+      throw err;
+    }
 
     if (result.escalationTriggered) {
       const newContent = currentContents.slice(history.length);

@@ -1,7 +1,8 @@
-import { updateTaskStatus, setMemory, deleteMemoriesByPrefix, getGHAContext, consumeGHAContext, getMemory, saveGHAContext, acquireChatLock, releaseChatLock, removePendingSpace, getHistory, addHistory, trimHistory, getAllMemories, getTasks } from "../db/index.js";
+import { updateTaskStatus, setMemory, deleteMemoriesByPrefix, getGHAContext, consumeGHAContext, getMemory, saveGHAContext, getHistory, addHistory, trimHistory } from "../db/index.js";
 import { MAX_HISTORY } from "../config.js";
+import { isAuthorizedRequest } from "../utils/auth.js";
+import { cleanContentsForHistory } from "../utils/history.js";
 
-const CALLBACK_TOKEN = "kokoa-runner-secret";
 
 async function sendTelegramMessage(botToken, chatId, text) {
   const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
@@ -20,16 +21,43 @@ export async function handleAPI(request, env, ctx) {
   const url = new URL(request.url);
   const path = url.pathname;
 
+  if (path === "/api/health") {
+    return new Response(JSON.stringify({ status: "ok", ts: Date.now() }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // Semua endpoint /api/* lain hanya untuk Spaces & GHA runner (fail-closed).
+  if (!isAuthorizedRequest(request, env)) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  // Spaces menyinkronkan riwayat chat ke D1 setelah agent loop selesai.
+  // Lock & pengiriman jawaban TIDAK diurus di sini — itu tugas spaces-poll/cron
+  // (handleSpacesResult), supaya tidak ada dua jalur yang melepas lock.
+  if (path === "/api/spaces-callback") {
+    if (request.method !== "POST") {
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+    try {
+      const { chatId, newContents } = await request.json();
+      if (!chatId) return new Response("Missing chatId", { status: 400 });
+      if (Array.isArray(newContents) && newContents.length > 0) {
+        await addHistory(env, String(chatId), cleanContentsForHistory(newContents));
+        await trimHistory(env, String(chatId), MAX_HISTORY);
+      }
+      return new Response("OK", { status: 200 });
+    } catch (e) {
+      console.error("Spaces callback error:", e);
+      return new Response("Error", { status: 500 });
+    }
+  }
 
   if (path === "/api/runner-callback") {
     if (request.method !== "POST") {
       return new Response("Method Not Allowed", { status: 405 });
     }
 
-    const auth = request.headers.get("Authorization");
-    if (auth !== `Bearer ${CALLBACK_TOKEN}`) {
-      return new Response("Unauthorized", { status: 401 });
-    }
 
     try {
       const body = await request.json();
@@ -112,10 +140,6 @@ export async function handleAPI(request, env, ctx) {
     const contextId = path.startsWith("/api/context/") ? path.split("/api/context/")[1] : null;
 
     if (request.method === "GET" && contextId) {
-      const auth = request.headers.get("Authorization");
-      if (auth !== `Bearer ${CALLBACK_TOKEN}`) {
-        return new Response("Unauthorized", { status: 401 });
-      }
       const ctx = await getGHAContext(env, contextId);
       if (!ctx) {
         return new Response("Not Found", { status: 404 });
@@ -127,10 +151,6 @@ export async function handleAPI(request, env, ctx) {
     }
 
     if (request.method === "PUT" && contextId) {
-      const auth = request.headers.get("Authorization");
-      if (auth !== `Bearer ${CALLBACK_TOKEN}`) {
-        return new Response("Unauthorized", { status: 401 });
-      }
       const body = await request.json();
       await saveGHAContext(env, { id: contextId, ...body });
       return new Response("OK", { status: 200 });
@@ -140,10 +160,6 @@ export async function handleAPI(request, env, ctx) {
   }
 
   if (path === "/api/memory" || path.startsWith("/api/memory/")) {
-    const auth = request.headers.get("Authorization");
-    if (auth !== `Bearer ${CALLBACK_TOKEN}`) {
-      return new Response("Unauthorized", { status: 401 });
-    }
 
     if (request.method === "POST") {
       const body = await request.json();
@@ -173,10 +189,6 @@ export async function handleAPI(request, env, ctx) {
 
   // Spaces menitipkan snapshot approval ke KV Worker (agar survive restart + bisa di-resume)
   if (path === "/api/approval-store" && request.method === "POST") {
-    const auth = request.headers.get("Authorization");
-    if (auth !== `Bearer ${CALLBACK_TOKEN}`) {
-      return new Response("Unauthorized", { status: 401 });
-    }
     try {
       const body = await request.json();
       const { id, snapshot } = body;
@@ -197,16 +209,12 @@ export async function handleAPI(request, env, ctx) {
   // Mengatasi pemblokiran NAT HF Spaces yang me-RST TLS langsung ke host AI.
   // Pola diadopsi dari HuggingClaw.
   if (path.startsWith("/api/ai-proxy/")) {
-    const auth = request.headers.get("Authorization");
-    if (auth !== `Bearer ${CALLBACK_TOKEN}`) {
-      return new Response("Unauthorized", { status: 401 });
-    }
     const targetHost = request.headers.get("x-target-host");
     if (!targetHost) {
       return new Response("Missing x-target-host", { status: 400 });
     }
-    // Allowlist ketat: tanpa ini endpoint ini jadi open proxy (secret-nya ada
-    // di repo publik) dan bisa dipakai menembak host internal Cloudflare.
+    // Allowlist ketat: tanpa ini endpoint ini jadi open proxy
+    // dan bisa dipakai menembak host internal Cloudflare.
     const ALLOWED_AI_HOSTS = [
       "generativelanguage.googleapis.com",
       "api.groq.com",
@@ -255,10 +263,6 @@ export async function handleAPI(request, env, ctx) {
       return new Response("Method Not Allowed", { status: 405 });
     }
 
-    const auth = request.headers.get("Authorization");
-    if (auth !== `Bearer ${CALLBACK_TOKEN}`) {
-      return new Response("Unauthorized", { status: 401 });
-    }
 
     const method = path.slice("/api/telegram-proxy/".length);
     if (!method) {
@@ -288,10 +292,6 @@ export async function handleAPI(request, env, ctx) {
   }
 
   if (path.startsWith("/api/history/")) {
-    const auth = request.headers.get("Authorization");
-    if (auth !== `Bearer ${CALLBACK_TOKEN}`) {
-      return new Response("Unauthorized", { status: 401 });
-    }
 
     const chatId = path.slice("/api/history/".length);
     if (!chatId) {
@@ -310,12 +310,6 @@ export async function handleAPI(request, env, ctx) {
         headers: { "Content-Type": "application/json" },
       });
     }
-  }
-
-  if (path === "/api/health") {
-    return new Response(JSON.stringify({ status: "ok", ts: Date.now() }), {
-      headers: { "Content-Type": "application/json" },
-    });
   }
 
   return new Response("Not Found", { status: 404 });

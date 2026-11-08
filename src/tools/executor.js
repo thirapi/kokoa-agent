@@ -27,6 +27,11 @@ import {
   deleteReminder,
 } from "../db/index.js";
 
+// Repo tempat workflow kokoa-dev.yml berada (penerima repository_dispatch).
+export function dispatchRepo(env) {
+  return env?.GHA_DISPATCH_REPO || "thirapi/kokoa-agent";
+}
+
 export async function executeTool(name, args, env, chatId) {
   switch (name) {
     case "listGitHubIssues": {
@@ -176,7 +181,7 @@ export async function executeTool(name, args, env, chatId) {
       return callGitHubAPI(env, endpoint);
     }
     case "triggerDeveloperWorkflow": {
-      const dispatchEndpoint = `repos/thirapi/kokoa-agent/dispatches`;
+      const dispatchEndpoint = `repos/${dispatchRepo(env)}/dispatches`;
       const mode = args.mode || "code";
       const body = {
         event_type: "kokoa-dev-task",
@@ -196,7 +201,9 @@ export async function executeTool(name, args, env, chatId) {
       return { message: msg };
     }
     case "checkWorkflowStatus": {
-      const runsEndpoint = `repos/${args.owner}/${args.repo}/actions/runs?event=repository_dispatch&per_page=3`;
+      // Workflow selalu jalan di repo "command center" (bukan repo target),
+      // jadi status dicek di sana — bukan di args.owner/args.repo.
+      const runsEndpoint = `repos/${dispatchRepo(env)}/actions/runs?event=repository_dispatch&per_page=3`;
       const runs = await callGitHubAPI(env, runsEndpoint);
       if (!runs || !runs.workflow_runs || runs.workflow_runs.length === 0) {
         return { message: "Belum ada workflow yang pernah dijalankan." };

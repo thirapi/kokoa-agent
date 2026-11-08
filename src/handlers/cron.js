@@ -1,6 +1,7 @@
 import { getDueReminders, markReminderTriggered, getPendingSpaces, cleanupExpiredPending } from "../db/index.js";
 import { sendTelegramMessage } from "../services/telegram.js";
 import { handleSpacesResult } from "../services/spaces-poll.js";
+import { runnerAuthHeaders } from "../utils/auth.js";
 
 async function pollSpacesResults(env, ctx) {
   if (!env.HF_SPACES_URL) return;
@@ -13,7 +14,8 @@ async function pollSpacesResults(env, ctx) {
     for (const row of pending) {
       const chatId = row.chat_id;
       try {
-        const res = await fetch(`${env.HF_SPACES_URL}/api/result/${chatId}`, {
+        const res = await fetch(`${env.HF_SPACES_URL}/api/result/${encodeURIComponent(chatId)}`, {
+          headers: runnerAuthHeaders(env),
           signal: AbortSignal.timeout(15000),
         });
         const data = await res.json();

@@ -9,12 +9,14 @@
     "deploy": "wrangler deploy",
     "db:create": "wrangler d1 create tg-bot-db",
     "db:init": "wrangler d1 execute tg-bot-db --file=src/db/schema.sql",
-    "db:init:local": "wrangler d1 execute tg-bot-db --local --file=src/db/schema.sql"
+    "db:init:local": "wrangler d1 execute tg-bot-db --local --file=src/db/schema.sql",
+    "test": "vitest run"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1"
   },
   "devDependencies": {
+    "vitest": "^3.2.7",
     "wrangler": "^3.109.0"
   }
 }

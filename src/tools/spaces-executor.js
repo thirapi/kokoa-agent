@@ -6,6 +6,18 @@ const SPACES_TOOL_NAMES = new Set([
   "cloneRepo", "readLocalFile", "listLocalDir", "grepLocalFiles", "runCommand",
 ]);
 
+// Variabel env yang TIDAK boleh diwariskan ke perintah shell buatan model
+// (mis. `env`, `printenv`, `cat /proc/self/environ`) — mencegah kebocoran secret.
+const SECRET_ENV_PATTERN = /(^|_)(TOKEN|SECRET|KEYS?|PASSWORD|PAT|CREDENTIALS?)(_|$)/i;
+
+function sanitizedChildEnv(source = process.env) {
+  const out = {};
+  for (const [k, v] of Object.entries(source)) {
+    if (!SECRET_ENV_PATTERN.test(k)) out[k] = v;
+  }
+  return out;
+}
+
 function isSpacesTool(name) {
   return SPACES_TOOL_NAMES.has(name);
 }
@@ -96,6 +108,7 @@ async function executeSpacesTool(name, args, env, chatId) {
           cwd, stdio: "pipe",
           timeout: timeoutSec * 1000,
           maxBuffer: 5 * 1024 * 1024, shell: true,
+          env: sanitizedChildEnv(),
         });
         return { exitCode: 0, stdout: output.toString().slice(0, 5000), stderr: "" };
       } catch (err) {
@@ -111,4 +124,4 @@ async function executeSpacesTool(name, args, env, chatId) {
   }
 }
 
-export { executeSpacesTool, SPACES_TOOL_NAMES, isSpacesTool };
+export { executeSpacesTool, SPACES_TOOL_NAMES, isSpacesTool, sanitizedChildEnv };

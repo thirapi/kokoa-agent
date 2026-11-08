@@ -8,6 +8,13 @@ import { runAgentLoop, buildProviderConfigs } from './handlers/message.js';
 import { executeTool } from './tools/executor.js';
 import { executeSpacesTool, isSpacesTool } from './tools/spaces-executor.js';
 import { ApprovalPending, approvalButtons, approvalPromptText } from './agent/approval.js';
+import { isAuthorizedHeader, getRunnerSecret } from './utils/auth.js';
+
+const RUNNER_SECRET = getRunnerSecret(process.env);
+if (!RUNNER_SECRET) {
+  console.error('[Spaces] RUNNER_SECRET belum diset (min 16 karakter) — semua endpoint /api/* akan menolak request (401).');
+}
+const RUNNER_AUTH = `Bearer ${RUNNER_SECRET || ''}`;
 
 function isDirectNetworkError(e) {
   const m = String(e?.message || e);
@@ -30,7 +37,7 @@ function proxyTelegramDirect(method, body, timeoutMs = 45000) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer kokoa-runner-secret',
+          'Authorization': RUNNER_AUTH,
           'Content-Length': Buffer.byteLength(bodyStr),
         },
         timeout: timeoutMs,
@@ -114,11 +121,16 @@ async function hybridExecutor(name, args, env, chatId) {
 }
 
 // Install system dependencies at startup
+// git sudah dipasang di Dockerfile; ini hanya cadangan kalau image lama.
 try {
-  execSync('apt-get update -qq && apt-get install -y -qq git', { stdio: 'pipe', timeout: 60000 });
-  console.log('Git installed successfully');
-} catch (e) {
-  console.log('Git install failed (non-fatal):', e.message);
+  execSync('git --version', { stdio: 'pipe' });
+} catch (_) {
+  try {
+    execSync('apt-get update -qq && apt-get install -y -qq git', { stdio: 'pipe', timeout: 60000 });
+    console.log('Git installed successfully');
+  } catch (e) {
+    console.log('Git install failed (non-fatal):', e.message);
+  }
 }
 
 const PORT = parseInt(process.env.PORT || '7860', 10);
@@ -186,7 +198,7 @@ function postWorkerJSONOnce(path, obj, timeoutMs) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer kokoa-runner-secret',
+        'Authorization': RUNNER_AUTH,
         'Content-Length': Buffer.byteLength(bodyStr),
       },
       timeout: timeoutMs,
@@ -241,7 +253,7 @@ async function finishSpacesResult(stringChatId, { finalText, newContent, escalat
     for (let attempt = 1; attempt <= 3 && !synced; attempt++) {
       try {
         await postWorkerJSON('/api/spaces-callback', {
-          chatId: stringChatId, newContents: newContent, token: 'kokoa-runner-secret', isFinal: true,
+          chatId: stringChatId, newContents: newContent, isFinal: true,
         });
         synced = true;
       } catch (e) {
@@ -321,17 +333,15 @@ function buildProxyEnv(envVars) {
 }
 
 const server = createServer(async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  const url = new URL(req.url, `http://localhost:${PORT}`);
 
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204);
-    res.end();
+  // Space ini publik: semua endpoint selain /health wajib bawa RUNNER_SECRET.
+  // Tanpa ini siapa pun bisa memicu agent (yang punya runCommand) & membaca hasil chat.
+  if (url.pathname !== '/health' && !isAuthorizedHeader(req.headers['authorization'], process.env)) {
+    res.writeHead(401, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Unauthorized' }));
     return;
   }
-
-  const url = new URL(req.url, `http://localhost:${PORT}`);
 
   if (url.pathname === '/health' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -415,7 +425,7 @@ const server = createServer(async (req, res) => {
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer kokoa-runner-secret',
+                    'Authorization': RUNNER_AUTH,
                     'Content-Length': Buffer.byteLength(bodyStr),
                   },
                   timeout: 15000,
@@ -583,7 +593,7 @@ const server = createServer(async (req, res) => {
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer kokoa-runner-secret',
+                    'Authorization': RUNNER_AUTH,
                     'Content-Length': Buffer.byteLength(bodyStr),
                   },
                   timeout: 15000,

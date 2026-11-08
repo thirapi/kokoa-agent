@@ -11,3 +11,5 @@ build/
 README.md
 .DS_Store
 target_workspace/
+test/
+vitest.config.js

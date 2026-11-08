@@ -5,6 +5,7 @@ import { checkGeminiQuota } from "../services/gemini.js";
 import { checkGroqQuota } from "../services/groq.js";
 import { clearHistory, acquireChatLock, releaseChatLock } from "../db/index.js";
 import { logError, getRecentErrors } from "../utils/logger.js";
+import { isValidTelegramWebhook } from "../utils/auth.js";
 
 // Identitas bot sendiri (untuk filter mention grup: hanya balas kalau BOT yang di-tag,
 // bukan saat user tag orang lain). Di-cache 7 hari di KV; bisa dioverride via BOT_USERNAME.
@@ -52,6 +53,12 @@ export function isBotMentioned(message, botIdent) {
 export async function handleWebhook(request, env, ctx) {
   if (request.method !== "POST") {
     return new Response("Method Not Allowed", { status: 405 });
+  }
+
+  // Tolak update palsu: Telegram mengirim header ini bila setWebhook pakai secret_token.
+  if (!isValidTelegramWebhook(request, env)) {
+    console.warn("[Webhook] Rejected: invalid X-Telegram-Bot-Api-Secret-Token");
+    return new Response("Unauthorized", { status: 401 });
   }
 
   try {
@@ -192,9 +199,10 @@ export async function handleWebhook(request, env, ctx) {
         };
         try {
           if (snap.runtime === "spaces" && env.HF_SPACES_URL) {
+            const { runnerAuthHeaders } = await import("../utils/auth.js");
             const r = await fetch(`${env.HF_SPACES_URL}/api/resume`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: runnerAuthHeaders(env, { "Content-Type": "application/json" }),
               body: JSON.stringify({ approvalId, decision, snapshot: snap }),
               signal: AbortSignal.timeout(15000),
             });
@@ -286,49 +294,6 @@ export async function handleWebhook(request, env, ctx) {
             ? "mode plan aktif wkwk. aku cuma observasi + analisis dulu, ga akan utak-atik apa2. santai aja kirim maumu apa"
             : "mode build aktif gass!! aku bisa eksekusi penuh lagi. mau kerjain apa?"
         );
-      })());
-      return new Response("OK", { status: 200 });
-    }
-
-    // Handle relay callback from Spaces via Telegram (when direct callback fails)
-    if (text.startsWith("__CB__")) {
-      ctx.waitUntil((async () => {
-        try {
-          const encoded = text.slice(6).trim();
-          const payload = JSON.parse(atob(encoded));
-          if (payload.token !== 'kokoa-runner-secret') {
-            console.warn('[Webhook] Relay callback rejected: invalid token');
-            return;
-          }
-          console.log(`[Webhook] Relay callback for chat ${payload.chatId}`);
-          if (payload.isFinal) {
-            await releaseChatLock(env, payload.chatId);
-          }
-          if (payload.newContents && payload.newContents.length > 0) {
-            const { addHistory, trimHistory } = await import("../db/index.js");
-            const cleaned = payload.newContents.map(c => ({
-              role: c.role,
-              parts: c.parts.map(p => {
-                if (p.inline_data) return { text: `[Media: ${p.inline_data.mime_type}]` };
-                const cp = {};
-                if (p.text !== undefined) cp.text = p.text;
-                if (Object.keys(cp).length > 0) return cp;
-                if (p.functionCall) return { text: `[FunctionCall: ${p.functionCall.name}]` };
-                if (p.functionResponse) return { text: `[FunctionResponse: ${p.functionResponse.name}]` };
-                return { text: '' };
-              }).filter(p => p.text || Object.keys(p).length > 0)
-            }));
-            await addHistory(env, payload.chatId, cleaned);
-            await trimHistory(env, payload.chatId, payload.maxHistory || 15);
-          }
-          // Delete relay message so user doesn't see it
-          if (message.message_id) {
-            const { deleteTelegramMessage } = await import("../services/telegram.js");
-            await deleteTelegramMessage(env.TELEGRAM_BOT_TOKEN, payload.chatId || chatId, message.message_id).catch(() => {});
-          }
-        } catch (e) {
-          console.error("[Webhook] Relay callback error:", e);
-        }
       })());
       return new Response("OK", { status: 200 });
     }

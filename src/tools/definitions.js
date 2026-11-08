@@ -371,20 +371,19 @@ export const githubTools = [
       },
       {
         name: "checkWorkflowStatus",
-        description: "Mengecek status terakhir workflow GitHub Actions yang pernah dipicu. Gunakan untuk melihat apakah task development masih jalan, udah selesai, atau gagal.",
+        description: "Mengecek status workflow GitHub Actions (triggerDeveloperWorkflow) terakhir yang pernah dipicu. Gunakan untuk melihat apakah task development masih jalan, udah selesai, atau gagal. Tidak perlu argumen.",
         parameters: {
           type: "OBJECT",
           properties: {
             owner: {
               type: "STRING",
-              description: "Username atau organisasi pemilik repo.",
+              description: "Opsional, diabaikan (status selalu diambil dari repo runner).",
             },
             repo: {
               type: "STRING",
-              description: "Nama repositori.",
+              description: "Opsional, diabaikan (status selalu diambil dari repo runner).",
             },
           },
-          required: ["owner", "repo"],
         },
       },
       {

@@ -12,7 +12,8 @@ const TARGET_HOSTS = new Set([
   'openrouter.ai',
 ]);
 
-const WORKER_SECRET = 'kokoa-runner-secret';
+// Dibaca lazy: env bisa saja diset setelah modul ini dimuat.
+const workerSecret = () => process.env.RUNNER_SECRET || '';
 
 // WORKER_URL di HF Spaces TIDAK berasal dari process.env saat container start.
 // Nilainya baru dikirim Worker lewat body request /api/process (workerUrl),
@@ -66,7 +67,7 @@ function patchRequest(originalFn) {
         if (headers['authorization'] || headers['Authorization']) {
           headers['x-target-auth'] = headers['authorization'] || headers['Authorization'];
         }
-        headers['Authorization'] = `Bearer ${WORKER_SECRET}`;
+        headers['Authorization'] = `Bearer ${workerSecret()}`;
 
         const newOptions = {
           ...opts,
@@ -112,7 +113,7 @@ if (typeof globalThis.fetch === 'function') {
         headers.set('x-target-host', u.hostname);
         const auth = headers.get('authorization');
         if (auth) headers.set('x-target-auth', auth);
-        headers.set('Authorization', `Bearer ${WORKER_SECRET}`);
+        headers.set('Authorization', `Bearer ${workerSecret()}`);
 
         const newInit = {
           ...init,
