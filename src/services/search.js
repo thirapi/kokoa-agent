@@ -46,35 +46,49 @@ async function searchSearxng(query) {
   throw new Error("SearXNG all failed");
 }
 
+// User-Agent sesuai kebijakan Wikimedia (nama bot + kontak). UA generik + banyak request
+// paralel dibalas 403/429 -> dulu semua gambar Wikimedia dianggap "mati".
+export const BOT_USER_AGENT = "KokoaBot/1.0 (https://github.com/thirapi/kokoa-agent; Telegram bot)";
+
+// Host besar yang membatasi request beruntun (403/429) walau file-nya ada.
+// Telegram yang mengunduh gambarnya nanti, jadi status itu tidak berarti file mati.
+const RATE_LIMITED_IMAGE_HOSTS = /(^|\.)(upload\.wikimedia\.org|staticflickr\.com|flickr\.com)$/i;
+
 // Cek URL gambar masih hidup via HEAD (Telegram harus bisa download URL-nya).
 // 405/501 = server tidak suka HEAD tapi file biasanya ada -> anggap hidup.
-async function isImageAlive(url) {
+export async function isImageAlive(url) {
+  let host = "";
+  try { host = new URL(url).hostname; } catch (_) { return false; }
   try {
     const res = await fetch(url, {
       method: "HEAD",
-      headers: { "User-Agent": "TelegramBot/1.0 (Cocoa)" },
+      headers: { "User-Agent": BOT_USER_AGENT },
       signal: AbortSignal.timeout(6000),
     });
     if (res.ok) return true;
     if (res.status === 405 || res.status === 501) return true;
+    if ((res.status === 403 || res.status === 429) && RATE_LIMITED_IMAGE_HOSTS.test(host)) return true;
     return false;
   } catch (_) {
     return false;
   }
 }
 
-async function keepAliveImages(results) {
-  const checks = await Promise.all(results.map(async (r) => ({
-    item: r,
-    alive: r.imageUrl ? await isImageAlive(r.imageUrl) : false,
-  })));
-  return checks.filter(c => c.alive).map(c => c.item);
+// Cek bertahap (maks 2 paralel) & berhenti setelah cukup — tidak membanjiri satu host.
+export async function keepAliveImages(results, want = 4) {
+  const alive = [];
+  for (let i = 0; i < results.length && alive.length < want; i += 2) {
+    const batch = results.slice(i, i + 2);
+    const ok = await Promise.all(batch.map((r) => (r.imageUrl ? isImageAlive(r.imageUrl) : false)));
+    batch.forEach((r, j) => { if (ok[j]) alive.push(r); });
+  }
+  return alive;
 }
 
 async function imageSearchOpenverse(query) {
   const url = `https://api.openverse.org/v1/images/?q=${encodeURIComponent(query)}&page_size=8&filter_dead=true`;
   const res = await fetch(url, {
-    headers: { "User-Agent": "TelegramBot/1.0 (Cocoa)" },
+    headers: { "User-Agent": BOT_USER_AGENT },
     signal: AbortSignal.timeout(10000),
   });
   if (!res.ok) throw new Error(`Openverse HTTP ${res.status}`);
@@ -181,7 +195,43 @@ async function searchGroqBrowser(query, env) {
 
 // YouTube search via Invidious public API (tanpa key).
 // Dipakai untuk full playback legal: bot bagikan link watch, user putar di YouTube.
+// Pencarian YouTube tanpa key lewat endpoint Innertube (dipakai web YouTube sendiri).
+// Instance Invidious publik sudah mati semua (diukur 2026-11-09) — jadi cadangan saja.
+export async function youtubeSearchInnertube(query) {
+  const res = await fetch("https://www.youtube.com/youtubei/v1/search?prettyPrint=false", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" },
+    signal: AbortSignal.timeout(10000),
+    body: JSON.stringify({
+      context: { client: { clientName: "WEB", clientVersion: "2.20250101.00.00", hl: "id", gl: "ID" } },
+      query,
+    }),
+  });
+  if (!res.ok) throw new Error(`Innertube HTTP ${res.status}`);
+  const data = await res.json();
+  const sections = data.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+  const results = sections
+    .flatMap((sec) => sec.itemSectionRenderer?.contents || [])
+    .map((c) => c.videoRenderer)
+    .filter((v) => v?.videoId)
+    .slice(0, 5)
+    .map((v) => ({
+      title: v.title?.runs?.map((r) => r.text).join("") || "",
+      channel: v.ownerText?.runs?.[0]?.text || "",
+      duration: v.lengthText?.simpleText || "",
+      videoId: v.videoId,
+      watchUrl: `https://www.youtube.com/watch?v=${v.videoId}`,
+    }));
+  if (results.length === 0) throw new Error("Innertube kosong");
+  return results;
+}
+
 export async function youtubeSearch(query) {
+  try {
+    return await youtubeSearchInnertube(query);
+  } catch (e) {
+    console.warn("[youtubeSearch] Innertube gagal, coba Invidious:", e.message);
+  }
   const instances = [
     "https://invidious.f5.si",
     "https://inv.invidious.nerdvpn.de",

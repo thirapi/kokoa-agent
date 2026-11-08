@@ -35,7 +35,10 @@ export async function handleAPI(request, env, ctx) {
   // Smoke test production (tanpa efek ke user). ?deep=1 menambah 1 panggilan LLM.
   if (path === "/api/selftest") {
     const { runSelftest } = await import("../agent/selftest.js");
-    const report = await runSelftest(env, { deep: url.searchParams.get("deep") === "1" });
+    const report = await runSelftest(env, {
+      deep: url.searchParams.get("deep") === "1",
+      features: url.searchParams.get("features") === "1",
+    });
     return new Response(JSON.stringify(report, null, 2), {
       status: report.ok ? 200 : 500,
       headers: { "Content-Type": "application/json" },

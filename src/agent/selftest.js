@@ -5,6 +5,16 @@ import { getChatState } from "../db/chat-state.js";
 import { semanticMemoryAvailable, indexMemory, forgetMemoryVector, EMBEDDING_MODEL } from "./semantic-memory.js";
 import { buildProviderConfigs } from "./providers.js";
 import { callGitHubAPI } from "../services/github.js";
+import { webSearch, imageSearch, songSearch, youtubeSearch, freeMusicSearch } from "../services/search.js";
+
+// Uji fitur pencarian dari jaringan runtime ini (hasil bisa beda dengan laptop).
+const FEATURE_PROBES = [
+  ["feature:webSearch", (env) => webSearch("berita teknologi hari ini", env), (r) => String(r).length > 50 ? "ada hasil" : null],
+  ["feature:imageSearch", () => imageSearch("kucing oren lucu"), (r) => r?.length ? `${r.length} gambar, mis. ${new URL(r[0].imageUrl).hostname}` : null],
+  ["feature:songSearch", () => songSearch("yoasobi idol"), (r) => (Array.isArray(r) ? r : r?.results)?.length ? "ada cuplikan" : null],
+  ["feature:youtubeSearch", () => youtubeSearch("yoasobi idol official"), (r) => r?.length ? `${r.length} video, mis. ${r[0].watchUrl}` : null],
+  ["feature:freeMusicSearch", () => freeMusicSearch("lofi"), (r) => JSON.stringify(r).includes(".mp3") ? "ada mp3 bebas lisensi" : null],
+];
 
 export const SELFTEST_CHAT = "__selftest__";
 
@@ -18,7 +28,7 @@ async function check(name, fn, timeoutMs = 20000) {
   }
 }
 
-export async function runSelftest(env, { deep = false } = {}) {
+export async function runSelftest(env, { deep = false, features = false } = {}) {
   const checks = [
     check("d1:task_traces", async () => {
       await saveTaskTrace(env, { id: "selftest", chatId: SELFTEST_CHAT, runtime: "selftest", prompt: "selftest", status: "ok", durationMs: 1, events: [] });
@@ -76,6 +86,17 @@ export async function runSelftest(env, { deep = false } = {}) {
       return (await r.json()).runtime;
     }),
   ];
+  if (features) {
+    for (const [name, run, describe] of FEATURE_PROBES) {
+      checks.push(check(name, async () => {
+        const r = await run(env);
+        if (r?.error) throw new Error(String(r.error).slice(0, 160));
+        const d = describe(r);
+        if (!d) throw new Error("hasil kosong");
+        return d;
+      }, 40000));
+    }
+  }
   if (deep) {
     // Satu panggilan LLM kecil lewat rotasi provider sungguhan (memakai sedikit kuota).
     checks.push(check("llm:roundtrip", async () => {
