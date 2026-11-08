@@ -34,6 +34,32 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
+      # RUNNER_SECRET disimpan sekali di GitHub Secrets, lalu disebar ke Worker & Space
+      # SEBELUM kode baru live — kode baru menolak semua request internal tanpa secret ini.
+      - name: Check RUNNER_SECRET
+        env:
+          RUNNER_SECRET: ${{ secrets.RUNNER_SECRET }}
+        run: |
+          if [ ${#RUNNER_SECRET} -lt 16 ]; then
+            echo "::error::GitHub secret RUNNER_SECRET belum diset / kurang dari 16 karakter"
+            exit 1
+          fi
+
+      - name: Sync RUNNER_SECRET to Cloudflare Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          RUNNER_SECRET: ${{ secrets.RUNNER_SECRET }}
+        run: printf '%s' "$RUNNER_SECRET" | npx wrangler secret put RUNNER_SECRET
+
+      - name: Sync RUNNER_SECRET to HuggingFace Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          RUNNER_SECRET: ${{ secrets.RUNNER_SECRET }}
+        run: |
+          body=$(jq -n --arg v "$RUNNER_SECRET" '{key: "RUNNER_SECRET", value: $v, description: "Shared secret Worker <-> Space"}')
+          curl -sSf -m 30 -X POST "https://huggingface.co/api/spaces/thirapi/tg-bot-cocoa/secrets" \
+            -H "Authorization: Bearer $HF_TOKEN" -H "Content-Type: application/json" -d "$body" > /dev/null
+
       - name: Deploy to Cloudflare Workers
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

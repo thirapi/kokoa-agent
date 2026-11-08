@@ -15,13 +15,11 @@ AI processor untuk Telegram bot. Menerima request dari Cloudflare Worker, menjal
 
 Repo & Space ini publik, jadi **semua** secret hanya boleh lewat env.
 
-`RUNNER_SECRET` (acak, min 16 karakter) wajib sama di tiga tempat:
+`RUNNER_SECRET` (acak, min 16 karakter) cukup diset sekali di GitHub Secrets;
+workflow deploy menyebarkannya otomatis ke Cloudflare Worker & HF Space:
 
 ```bash
-SECRET=$(openssl rand -hex 32)
-echo "$SECRET" | npx wrangler secret put RUNNER_SECRET     # Cloudflare Worker
-gh secret set RUNNER_SECRET --body "$SECRET"               # GitHub Actions
-# HF Space: Settings -> Variables and secrets -> New secret RUNNER_SECRET
+gh secret set RUNNER_SECRET --body "$(openssl rand -hex 32)"
 ```
 
 Opsional tapi disarankan, verifikasi webhook Telegram:

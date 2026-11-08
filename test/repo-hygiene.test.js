@@ -45,6 +45,16 @@ describe("repo hygiene", () => {
     expect(y).toMatch(/needs:\s*test/);
   });
 
+  it("deploy menyebar RUNNER_SECRET ke Worker & Space sebelum kode baru live", () => {
+    const y = readFileSync(".github/workflows/deploy.yml", "utf8");
+    const cf = y.indexOf("wrangler secret put RUNNER_SECRET");
+    const hf = y.indexOf("/api/spaces/thirapi/tg-bot-cocoa/secrets");
+    expect(cf).toBeGreaterThan(-1);
+    expect(hf).toBeGreaterThan(-1);
+    expect(cf).toBeLessThan(y.indexOf("npx wrangler deploy"));
+    expect(hf).toBeLessThan(y.indexOf("git push -f hf main"));
+  });
+
   it("web UI sudah tidak dibundel", () => {
     const w = readFileSync("wrangler.jsonc", "utf8");
     expect(w).not.toMatch(/"assets"/);
