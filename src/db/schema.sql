@@ -83,3 +83,10 @@ CREATE TABLE IF NOT EXISTS task_traces (
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 CREATE INDEX IF NOT EXISTS idx_task_traces_chat ON task_traces(chat_id, created_at);
+
+CREATE TABLE IF NOT EXISTS remote_jobs (
+  chat_id TEXT PRIMARY KEY,
+  runtime TEXT NOT NULL,
+  prompt TEXT,
+  started_at INTEGER NOT NULL DEFAULT (unixepoch())
+);

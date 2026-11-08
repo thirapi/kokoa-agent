@@ -7,7 +7,7 @@ vi.mock("../src/services/telegram.js", () => ({
 }));
 vi.mock("../src/db/index.js", () => ({
   clearHistory: vi.fn(), acquireChatLock: vi.fn(async () => true), releaseChatLock: vi.fn(),
-  addPendingSpace: vi.fn(async () => {}),
+  addPendingSpace: vi.fn(async () => {}), markRemoteJobStarted: vi.fn(async () => {}),
   getLatestTaskTrace: vi.fn(async () => ({ runtime: "vercel", status: "ok", duration_ms: 5000, prompt: "cek repo",
     events: JSON.stringify([{ t: 0, kind: "tool", name: "getPRDiff", ok: true, ms: 300 }]) })),
 }));
@@ -41,6 +41,20 @@ describe("handleWebhook", () => {
     await handleWebhook(post(update("/trace")), env, ctx);
     await ctx.flush();
     expect(sendTelegramMessage).toHaveBeenCalledWith(env.TELEGRAM_BOT_TOKEN, "111", expect.stringContaining("getPRDiff"));
+    expect(processMessage).not.toHaveBeenCalled();
+  });
+
+  it("/retry mengulang prompt tugas terakhir lewat alur normal", async () => {
+    await env.CHAT_HISTORY.put("spaces_prompt:111", "cek struktur repo thirapi/kokoa-agent");
+    await handleWebhook(post(update("/retry")), env, ctx);
+    await ctx.flush();
+    expect(processMessage).toHaveBeenCalledTimes(1);
+    expect(processMessage.mock.calls[0][0].text).toBe("cek struktur repo thirapi/kokoa-agent");
+  });
+
+  it("/retry tanpa tugas sebelumnya -> diberi tahu, tidak diproses", async () => {
+    await handleWebhook(post(update("/retry")), env, ctx);
+    await ctx.flush();
     expect(processMessage).not.toHaveBeenCalled();
   });
 

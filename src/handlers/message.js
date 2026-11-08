@@ -913,6 +913,8 @@ export async function processMessage(message, env, options = {}) {
         });
         if (res.status !== 202) throw new Error(`Vercel HTTP ${res.status}`);
         shouldReleaseLock = false; // dilepas saat /api/agent-result mengantar hasil
+        const { markRemoteJobStarted } = await import("../db/index.js");
+        await markRemoteJobStarted(env, chatId, "vercel", userPrompt);
         console.log(`[Route] chat ${chatId} diproses di Vercel`);
         return 'done';
       } catch (e) {

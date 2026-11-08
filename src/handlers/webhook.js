@@ -215,6 +215,8 @@ export async function handleWebhook(request, env, ctx) {
             });
             if (r.status !== 202) throw new Error(`Vercel resume HTTP ${r.status}`);
             lockHandedOff = true; // dilepas saat /api/agent-result mengantar hasil
+            const { markRemoteJobStarted } = await import("../db/index.js");
+            await markRemoteJobStarted(env, chatId, "vercel", snap.userPrompt || "(lanjutan setelah approval)");
             return;
           }
           if (snap.runtime === "spaces" && env.HF_SPACES_URL) {
@@ -395,6 +397,18 @@ export async function handleWebhook(request, env, ctx) {
         }
       })());
       return new Response("OK", { status: 200 });
+    }
+
+    // /retry: ulangi tugas terakhir (prompt teks terakhir yang dikirim ke runtime jarak jauh).
+    if (normalizedText === "/retry") {
+      const last = await env.CHAT_HISTORY.get(`spaces_prompt:${chatId}`);
+      if (!last) {
+        ctx.waitUntil(sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "ga ada tugas terakhir yang bisa diulang wkwk"));
+        return new Response("OK", { status: 200 });
+      }
+      message = { ...message, text: last, caption: undefined, photo: undefined, voice: undefined };
+      text = last;
+      normalizedText = last.trim().toLowerCase();
     }
 
     // /trace: jejak langkah demi langkah tugas terakhir (LLM, tool, approval, durasi).

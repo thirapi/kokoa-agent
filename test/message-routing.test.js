@@ -22,7 +22,7 @@ vi.mock("../src/db/index.js", async () => {
   return {
     getHistory: vi.fn(async () => []), addHistory: fn(), trimHistory: fn(), clearHistory: fn(),
     saveGHAContext: fn(), getTasks: vi.fn(async () => []), getAllMemories: vi.fn(async () => []),
-    acquireChatLock: vi.fn(async () => true), releaseChatLock: fn(), saveTaskTrace: fn(),
+    acquireChatLock: vi.fn(async () => true), releaseChatLock: fn(), saveTaskTrace: fn(), markRemoteJobStarted: fn(),
     setMemory: fn(), getMemory: fn(), deleteMemory: fn(), getRecentMemories: vi.fn(async () => []),
     addTask: fn(), updateTaskStatus: fn(), createTasks: fn(), clearTasks: fn(),
     addReminder: fn(), getReminders: vi.fn(async () => []), deleteReminder: fn(),
@@ -147,6 +147,7 @@ describe("processMessage routing", () => {
       expect(processViaSpaces).not.toHaveBeenCalled();
       expect(fetchGeminiGenerate).not.toHaveBeenCalled();
       expect(db.releaseChatLock).not.toHaveBeenCalled();
+      expect(db.markRemoteJobStarted).toHaveBeenCalledWith(env, "5", "vercel", "tolong cek bug di repo thirapi/kokoa-agent");
     });
 
     it("Vercel gagal -> cadangan ke Spaces", async () => {

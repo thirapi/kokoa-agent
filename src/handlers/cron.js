@@ -86,6 +86,30 @@ async function pollSpacesResults(env, ctx) {
   }
 }
 
+// Watchdog: tugas di Vercel yang tidak memberi kabar > 6 menit (maxDuration 300 detik +
+// pengantaran) dianggap mati. User diberi tahu, lock & pesan progres dibersihkan.
+export async function reapStaleRemoteJobs(env, maxAgeSeconds = 360) {
+  const { getStaleRemoteJobs, markRemoteJobDone, releaseChatLock } = await import("../db/index.js");
+  const { deleteTelegramMessage } = await import("../services/telegram.js");
+  const stale = await getStaleRemoteJobs(env, maxAgeSeconds);
+  for (const job of stale) {
+    const chatId = job.chat_id;
+    await markRemoteJobDone(env, chatId);
+    if (await env.CHAT_HISTORY.get(`hdl:${chatId}`)) continue; // hasil sedang diantar
+    const pid = await env.CHAT_HISTORY.get(`progress_msg:${chatId}`);
+    if (pid) {
+      await deleteTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, parseInt(pid)).catch(() => {});
+      await env.CHAT_HISTORY.delete(`progress_msg:${chatId}`).catch(() => {});
+    }
+    await releaseChatLock(env, chatId);
+    await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId,
+      `tugas yang tadi (${job.runtime}) ga ngasih kabar lebih dari ${Math.round(maxAgeSeconds / 60)} menit, kayaknya keputus di tengah jalan 😥\n` +
+      `ketik /retry buat ngulang, atau /trace buat liat sampai mana.`);
+    console.warn(`[Watchdog] job ${job.runtime} untuk chat ${chatId} dianggap mati`);
+  }
+  return stale.length;
+}
+
 // Akun bot (pemilik GITHUB_PAT_TOKEN) otomatis menerima undangan collaborator —
 // HANYA dari pemilik (OWNER_GITHUB_LOGIN, default thirapi). Undangan lain diabaikan.
 export async function acceptOwnerInvitations(env) {
@@ -136,6 +160,9 @@ export async function handleCron(event, env, ctx) {
 
   // 2. Poll Spaces for pending results (fallback for short-poll failures)
   await pollSpacesResults(env, ctx);
+
+  // 2b. Watchdog tugas Vercel yang mati tanpa kabar.
+  await reapStaleRemoteJobs(env).catch((e) => console.error("[Watchdog] error:", e.message));
 
   // 3. Sekali sehari (03:00 WIB): buang trace > 7 hari.
   const at = new Date(event?.scheduledTime || Date.now());

@@ -508,3 +508,34 @@ export async function pruneTaskTraces(env, maxAgeSeconds = 7 * 24 * 3600) {
     console.error("pruneTaskTraces error:", e.message);
   }
 }
+
+// ---- Tugas yang sedang berjalan di runtime jarak jauh (untuk watchdog) ----
+export async function markRemoteJobStarted(env, chatId, runtime, prompt) {
+  try {
+    await env.DB.prepare(
+      "INSERT OR REPLACE INTO remote_jobs (chat_id, runtime, prompt, started_at) VALUES (?, ?, ?, unixepoch())"
+    ).bind(String(chatId), runtime, String(prompt || "").slice(0, 2000)).run();
+  } catch (e) {
+    console.error("markRemoteJobStarted error:", e.message);
+  }
+}
+
+export async function markRemoteJobDone(env, chatId) {
+  try {
+    await env.DB.prepare("DELETE FROM remote_jobs WHERE chat_id = ?").bind(String(chatId)).run();
+  } catch (e) {
+    console.error("markRemoteJobDone error:", e.message);
+  }
+}
+
+export async function getStaleRemoteJobs(env, maxAgeSeconds = 360) {
+  try {
+    const { results } = await env.DB.prepare(
+      "SELECT chat_id, runtime, prompt, started_at FROM remote_jobs WHERE started_at < unixepoch() - ?"
+    ).bind(maxAgeSeconds).all();
+    return results || [];
+  } catch (e) {
+    console.error("getStaleRemoteJobs error:", e.message);
+    return [];
+  }
+}

@@ -28,6 +28,10 @@ export async function sendApprovalPrompt(env, chatId, approval) {
 // karena jaringan/provider. Dalam kasus itu: jangan kirim pesan error, jangan lepas lock,
 // jangan proses antrean — pemanggil yang melanjutkan. Return { retryable }.
 export async function handleSpacesResult(env, chatId, data, progressMsgId, opts = {}) {
+  if (opts.source === "vercel") {
+    const { markRemoteJobDone } = await import("../db/index.js");
+    await markRemoteJobDone(env, chatId);
+  }
   if (Array.isArray(data?.trace)) {
     const { saveTaskTrace } = await import("../db/index.js");
     const { traceStatus } = await import("../agent/trace.js");

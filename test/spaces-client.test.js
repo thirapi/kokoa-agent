@@ -7,6 +7,7 @@ vi.mock("../src/db/index.js", () => ({
   releaseChatLock: vi.fn(), acquireChatLock: vi.fn(async () => true),
   getDueReminders: vi.fn(async () => []), markReminderTriggered: vi.fn(),
   getPendingSpaces: vi.fn(async () => []), cleanupExpiredPending: vi.fn(), saveTaskTrace: vi.fn(), pruneTaskTraces: vi.fn(),
+  markRemoteJobDone: vi.fn(), markRemoteJobStarted: vi.fn(), getStaleRemoteJobs: vi.fn(async () => []),
 }));
 vi.mock("../src/services/telegram.js", () => ({
   sendTelegramMessage: vi.fn(async () => [{ message_id: 1 }]), deleteTelegramMessage: vi.fn(async () => {}),
@@ -18,7 +19,7 @@ import * as db from "../src/db/index.js";
 import { sendTelegramMessage } from "../src/services/telegram.js";
 import { processViaSpaces } from "../src/services/hf-spaces.js";
 import { pollSpacesResult, handleSpacesResult } from "../src/services/spaces-poll.js";
-import { handleCron } from "../src/handlers/cron.js";
+import { handleCron, reapStaleRemoteJobs } from "../src/handlers/cron.js";
 import { baseEnv, fakeCtx, bearer } from "./helpers.js";
 
 const json = (obj, status = 200) => new Response(JSON.stringify(obj), { status });
@@ -184,5 +185,37 @@ describe("cron", () => {
     const [, id, now, next] = db.markReminderTriggered.mock.calls[0];
     expect(id).toBe(1);
     expect(next).toBe(now + 60);
+  });
+});
+
+describe("watchdog tugas Vercel", () => {
+  it("tugas tanpa kabar > 6 menit: user dikabari, lock & pesan progres dibersihkan", async () => {
+    const { deleteTelegramMessage } = await import("../src/services/telegram.js");
+    db.getStaleRemoteJobs.mockResolvedValueOnce([{ chat_id: "9", runtime: "vercel", prompt: "cek repo" }]);
+    await env.CHAT_HISTORY.put("progress_msg:9", "55");
+    expect(await reapStaleRemoteJobs(env)).toBe(1);
+    expect(db.markRemoteJobDone).toHaveBeenCalledWith(env, "9");
+    expect(db.releaseChatLock).toHaveBeenCalledWith(env, "9");
+    expect(deleteTelegramMessage).toHaveBeenCalledWith("000:TEST", "9", 55);
+    expect(sendTelegramMessage).toHaveBeenCalledWith("000:TEST", "9", expect.stringContaining("/retry"));
+  });
+
+  it("tidak mengganggu tugas yang hasilnya sedang diantar", async () => {
+    db.getStaleRemoteJobs.mockResolvedValueOnce([{ chat_id: "9", runtime: "vercel" }]);
+    await env.CHAT_HISTORY.put("hdl:9", "1");
+    await reapStaleRemoteJobs(env);
+    expect(db.releaseChatLock).not.toHaveBeenCalled();
+    expect(sendTelegramMessage).not.toHaveBeenCalled();
+  });
+
+  it("hasil dari Vercel menandai tugas selesai", async () => {
+    fetchMock.mockResolvedValue(json({}));
+    await handleSpacesResult(env, "9", { finalText: "x" }, null, { source: "vercel" });
+    expect(db.markRemoteJobDone).toHaveBeenCalledWith(env, "9");
+  });
+
+  it("cron menjalankan watchdog", async () => {
+    await handleCron({ scheduledTime: Date.UTC(2026, 10, 9, 1, 7) }, env, fakeCtx());
+    expect(db.getStaleRemoteJobs).toHaveBeenCalled();
   });
 });
