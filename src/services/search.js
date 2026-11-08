@@ -295,116 +295,108 @@ export async function youtubeSearch(query) {
   throw new Error("Semua YouTube backend gagal: " + errors.join("; "));
 }
 
-// Audio FULL lagu dari YouTube via Piped instance (tanpa key).
-// PENTING: stream asli YouTube itu m4a/webm (opus), BUKAN mp3 — YouTube tidak punya stream mp3.
-// - Tanpa COBALT_INSTANCE: return audioUrl langsung (m4a, bisa dikirim via sendAudio, Telegram bisa putar).
-// - Dengan COBALT_INSTANCE (self-host imput/cobalt): resolve ke file MP3 beneran,
-//   return mp3Url siap kirim via sendAudio.
-// Env (Worker KV/secrets atau process.env di Spaces): PIPED_INSTANCE (opsional),
-// COBALT_INSTANCE (opsional, misal https://cobalt.milikmu.id).
-export async function pipedAudioSearch(query, env) {
-  const envOf = (k) => (env && env[k]) || (typeof process !== 'undefined' && process.env?.[k]) || null;
-  const customPiped = envOf("PIPED_INSTANCE");
-  const instances = [
-    ...(customPiped ? [customPiped.replace(/\/+$/, "")] : []),
-    "https://pipedapi.kavin.rocks",
-    "https://pipedapi.adminforge.de",
-    "https://pipedapi.leptons.xyz",
-    "https://pipedapi.reallyaweso.me",
-  ];
-  const errors = [];
-  for (const base of instances) {
-    try {
-      // 1. Cari video pertama yang cocok
-      const searchUrl = `${base}/search?q=${encodeURIComponent(query)}&filter=videos`;
-      const res = await fetch(searchUrl, {
-        headers: { "User-Agent": "TelegramBot/1.0 (Cocoa)" },
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!res.ok) {
-        errors.push(`${base}: search HTTP ${res.status}`);
-        continue;
-      }
-      const data = await res.json();
-      const items = Array.isArray(data?.items) ? data.items : [];
-      const video = items.find(i => typeof i?.url === "string" && i.url.includes("watch?v="));
-      if (!video) {
-        errors.push(`${base}: tidak ada video yang cocok`);
-        continue;
-      }
-      const m = /[?&]v=([A-Za-z0-9_-]{6,})/.exec(video.url);
-      if (!m) {
-        errors.push(`${base}: videoId tidak kebaca`);
-        continue;
-      }
-      const videoId = m[1];
-      const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
+// YouTube -> file MP3 lewat konverter pribadi (scripts/yt-mp3-server, yt-dlp + ffmpeg).
+// YouTube tidak punya stream mp3, jadi harus dikonversi; Worker tidak bisa menjalankan ffmpeg.
+// Env: MP3_CONVERTER_URL (alamat server/tunnel), MP3_CONVERTER_SECRET (kunci HMAC, sama dgn server).
+const YT_ID = /^[A-Za-z0-9_-]{11}$/;
+const MP3_MAX_SEC = 1200; // Telegram: file via URL maks 20 MB (~20 menit @128 kbps)
 
-      // 2. Ambil daftar audio stream (direct GoogleVideo URL)
-      const sRes = await fetch(`${base}/streams/${videoId}`, {
-        headers: { "User-Agent": "TelegramBot/1.0 (Cocoa)" },
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!sRes.ok) {
-        errors.push(`${base}: streams HTTP ${sRes.status}`);
-        continue;
-      }
-      const streams = await sRes.json();
-      const audioStreams = (streams.audioStreams || []).filter(a => a?.url);
-      if (audioStreams.length === 0) {
-        errors.push(`${base}: tidak ada audio stream`);
-        continue;
-      }
-      const byBitrate = [...audioStreams].sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-      const m4a = byBitrate.find(a => /mp4a|m4a/i.test(`${a.codec || ""} ${a.mimeType || ""}`));
-      const best = m4a || byBitrate[0];
-      const ext = /opus|webm/i.test(`${best.codec || ""} ${best.mimeType || ""}`) ? "webm" : "m4a";
+export function extractYouTubeId(text) {
+  const s = String(text || "").trim();
+  if (YT_ID.test(s)) return s;
+  const m = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/|music\.youtube\.com\/watch\?(?:.*&)?v=)([A-Za-z0-9_-]{11})/.exec(s);
+  return m ? m[1] : null;
+}
 
-      const result = {
-        title: streams.title || video.title || "",
-        artist: streams.uploader || video.uploaderName || "",
-        watchUrl,
-        format: ext, // format asli stream: m4a/webm (BUKAN mp3)
-        mimeType: best.mimeType || "",
-        bitrate: best.bitrate || null,
-        audioUrl: best.url, // direct GoogleVideo URL — cepat kedaluwarsa, langsung kirim via sendAudio
-        duration: streams.duration ?? null,
-      };
+// "4:05" / "1:02:03" -> detik. Innertube dengan hl=id memakai titik: "3.46" / "1.02.03".
+export function parseDuration(text) {
+  if (!text) return null;
+  const parts = String(text).trim().split(/[:.]/).map(Number);
+  if (parts.length > 3 || parts.some((n) => !Number.isInteger(n) || n < 0)) return null;
+  return parts.reduce((acc, n) => acc * 60 + n, 0);
+}
 
-      // 3. Cobalt (opsional): convert ke file MP3 beneran
-      const cobalt = envOf("COBALT_INSTANCE");
-      if (cobalt) {
-        try {
-          const cRes = await fetch(cobalt.replace(/\/+$/, "") + "/", {
-            method: "POST",
-            headers: { "Accept": "application/json", "Content-Type": "application/json" },
-            body: JSON.stringify({ url: watchUrl, downloadMode: "audio", audioFormat: "mp3" }),
-            signal: AbortSignal.timeout(30000),
-          });
-          if (cRes.ok) {
-            const cData = await cRes.json();
-            if ((cData.status === "tunnel" || cData.status === "redirect") && cData.url) {
-              result.format = "mp3";
-              result.mp3Url = cData.url; // URL file MP3 — kirim ini via sendAudio
-              result.via = "cobalt";
-            } else {
-              result.cobaltNote = `cobalt status: ${cData.status || "unknown"}`;
-            }
-          } else {
-            result.cobaltNote = `cobalt HTTP ${cRes.status}`;
-          }
-        } catch (e) {
-          result.cobaltNote = `cobalt gagal: ${e.message}`;
-        }
-      } else {
-        result.note = "mau file MP3 beneran? set COBALT_INSTANCE (self-host imput/cobalt) — tanpa itu hasilnya stream m4a/webm langsung.";
-      }
-      return result;
-    } catch (e) {
-      errors.push(`${base}: ${e.message}`);
-    }
+function base64url(bytes) {
+  let bin = "";
+  for (const b of new Uint8Array(bytes)) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Harus identik dengan sign() di scripts/yt-mp3-server/server.js.
+// Web Crypto dipakai agar jalan di Worker, Vercel, dan Node.
+export async function signMp3Url(base, secret, videoId, ttlSec = 3600, path = "/mp3") {
+  const exp = Math.floor(Date.now() / 1000) + ttlSec;
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = base64url(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${videoId}.${exp}`)));
+  return `${base.replace(/\/+$/, "")}${path}?v=${videoId}&exp=${exp}&sig=${sig}`;
+}
+
+async function youtubeOEmbed(videoId) {
+  try {
+    const res = await fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}`, {
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) return {};
+    const d = await res.json();
+    return { title: d.title || "", channel: d.author_name || "" };
+  } catch {
+    return {};
   }
-  throw new Error("Semua Piped backend gagal: " + errors.join("; "));
+}
+
+export async function youtubeMp3(query, env) {
+  const envOf = (k) => (env && env[k]) || (typeof process !== "undefined" && process.env?.[k]) || null;
+  const base = envOf("MP3_CONVERTER_URL");
+  const secret = envOf("MP3_CONVERTER_SECRET");
+
+  // 1. Tentukan video: link/ID langsung, atau cari di YouTube.
+  let video;
+  const directId = extractYouTubeId(query);
+  if (directId) {
+    video = { videoId: directId, watchUrl: `https://www.youtube.com/watch?v=${directId}`, ...(await youtubeOEmbed(directId)) };
+  } else {
+    const results = await youtubeSearchInnertube(query);
+    // lewati live (tanpa durasi) & video kepanjangan (mix 1 jam dll)
+    video = results.find((v) => {
+      const sec = parseDuration(v.duration);
+      return sec && sec <= MP3_MAX_SEC;
+    });
+    if (!video) return { error: "Tidak ada video yang durasinya cocok (maks 20 menit).", results };
+  }
+
+  if (!base || !secret) {
+    return {
+      ...video,
+      error: "Konverter MP3 belum dipasang (MP3_CONVERTER_URL/MP3_CONVERTER_SECRET kosong). Bagikan watchUrl saja ke user.",
+    };
+  }
+
+  // 2. URL bertanda tangan untuk Telegram + minta server mulai konversi sekarang,
+  //    supaya saat sendAudio dipanggil filenya sudah (hampir) siap.
+  const mp3Url = await signMp3Url(base, secret, video.videoId);
+  const prepareUrl = (await signMp3Url(base, secret, video.videoId, 3600, "/prepare")) + "&wait=12";
+  let status = "unknown";
+  try {
+    const res = await fetch(prepareUrl, { signal: AbortSignal.timeout(15000) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ...video, error: `Konversi MP3 gagal: ${data.error || `HTTP ${res.status}`}. Bagikan watchUrl saja.` };
+    status = data.status || "unknown";
+  } catch (e) {
+    if (e?.name !== "TimeoutError") {
+      return { ...video, error: `Konverter MP3 tidak bisa dihubungi (${e.message}). Bagikan watchUrl saja.` };
+    }
+    status = "converting";
+  }
+
+  return {
+    title: video.title || "",
+    channel: video.channel || "",
+    duration: video.duration || "",
+    watchUrl: video.watchUrl,
+    format: "mp3",
+    status, // ready | converting
+    mp3Url, // kirim via sendAudio (audioUrl=mp3Url, title, performer=channel)
+  };
 }
 
 // Musik gratis berlisensi Creative Commons (ccMixter, tanpa key).

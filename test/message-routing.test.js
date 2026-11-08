@@ -7,7 +7,7 @@ vi.mock("../src/services/groq.js", () => ({ fetchGroqGenerate: vi.fn() }));
 vi.mock("../src/services/openrouter.js", () => ({ fetchOpenRouterGenerate: vi.fn() }));
 vi.mock("../src/services/search.js", () => ({
   webSearch: vi.fn(async () => ({ results: [] })), webFetch: vi.fn(), imageSearch: vi.fn(),
-  songSearch: vi.fn(), youtubeSearch: vi.fn(), freeMusicSearch: vi.fn(), pipedAudioSearch: vi.fn(),
+  songSearch: vi.fn(), youtubeSearch: vi.fn(), freeMusicSearch: vi.fn(), youtubeMp3: vi.fn(),
 }));
 vi.mock("../src/services/telegram.js", () => ({
   sendTelegramMessage: vi.fn(async () => [{ message_id: 99 }]), sendTelegramAction: vi.fn(async () => {}),

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { isImageAlive, keepAliveImages, youtubeSearchInnertube, youtubeSearch, BOT_USER_AGENT } from "../src/services/search.js";
+import { isImageAlive, keepAliveImages, youtubeSearchInnertube, youtubeSearch, BOT_USER_AGENT, youtubeMp3, extractYouTubeId, parseDuration, signMp3Url } from "../src/services/search.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -75,5 +75,56 @@ describe("cuplikan lagu", () => {
     await expect(songSearch("x")).rejects.toThrow(/Semua sumber lagu gagal: itunes: iTunes HTTP 503; deezer: Deezer HTTP 503/);
     vi.stubGlobal("fetch", vi.fn(async (u) => new Response(JSON.stringify(String(u).includes("itunes") ? { results: [] } : { data: [] }))));
     expect((await songSearch("zzz")).message).toMatch(/Tidak ada lagu/);
+  });
+});
+
+describe("YouTube -> MP3", () => {
+  const innertube = (items) => new Response(JSON.stringify({
+    contents: { twoColumnSearchResultsRenderer: { primaryContents: { sectionListRenderer: { contents: [{ itemSectionRenderer: { contents: items.map((v) => ({ videoRenderer: v })) } }] } } } },
+  }));
+  const vid = (videoId, len) => ({ videoId, title: { runs: [{ text: `Lagu ${videoId}` }] }, ownerText: { runs: [{ text: "Artis" }] }, ...(len ? { lengthText: { simpleText: len } } : {}) });
+  const env = { MP3_CONVERTER_URL: "https://mp3.contoh.id/", MP3_CONVERTER_SECRET: "rahasia-yang-panjang-sekali" };
+
+  it("ambil videoId dari berbagai bentuk link", () => {
+    expect(extractYouTubeId("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10")).toBe("dQw4w9WgXcQ");
+    expect(extractYouTubeId("https://youtu.be/dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
+    expect(extractYouTubeId("https://music.youtube.com/watch?list=x&v=dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
+    expect(extractYouTubeId("youtube.com/shorts/dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
+    expect(extractYouTubeId("yoasobi idol")).toBe(null);
+    expect(parseDuration("1:02:03")).toBe(3723);
+    expect(parseDuration("4:05")).toBe(245);
+    expect(parseDuration("3.46")).toBe(226); // format Innertube hl=id
+    expect(parseDuration("1.05.00")).toBe(3900);
+    expect(parseDuration("LIVE")).toBe(null);
+  });
+
+  it("tanda tangan cocok dengan HMAC di server konverter", async () => {
+    const { createHmac } = await import("node:crypto");
+    const u = new URL(await signMp3Url("https://mp3.contoh.id/", "kunci", "dQw4w9WgXcQ"));
+    const expected = createHmac("sha256", "kunci").update(`dQw4w9WgXcQ.${u.searchParams.get("exp")}`).digest("base64url");
+    expect(u.origin + u.pathname).toBe("https://mp3.contoh.id/mp3");
+    expect(u.searchParams.get("sig")).toBe(expected);
+  });
+
+  it("lewati live & video kepanjangan, siapkan konversi, kembalikan mp3Url", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (u) => String(u).includes("youtubei")
+      ? innertube([vid("LIVE0000000"), vid("MIX00000000", "1.05.00"), vid("dQw4w9WgXcQ", "3:33")])
+      : new Response(JSON.stringify({ ok: true, status: "ready" }))));
+    const r = await youtubeMp3("rick astley", env);
+    expect(r).toMatchObject({ title: "Lagu dQw4w9WgXcQ", channel: "Artis", format: "mp3", status: "ready" });
+    expect(r.mp3Url).toMatch(/^https:\/\/mp3\.contoh\.id\/mp3\?v=dQw4w9WgXcQ&exp=\d+&sig=/);
+    expect(String(fetch.mock.calls[1][0])).toMatch(/\/prepare\?v=dQw4w9WgXcQ.*&wait=12$/);
+  });
+
+  it("tanpa konverter / konverter error -> error + watchUrl untuk fallback", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (u) => String(u).includes("oembed")
+      ? new Response(JSON.stringify({ title: "Judul", author_name: "Kanal" }))
+      : new Response(JSON.stringify({ error: "video kepanjangan" }), { status: 422 })));
+    const a = await youtubeMp3("https://youtu.be/dQw4w9WgXcQ", {});
+    expect(a.error).toMatch(/belum dipasang/);
+    expect(a).toMatchObject({ title: "Judul", watchUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" });
+    const b = await youtubeMp3("https://youtu.be/dQw4w9WgXcQ", env);
+    expect(b.error).toMatch(/video kepanjangan/);
+    expect(b.mp3Url).toBeUndefined();
   });
 });

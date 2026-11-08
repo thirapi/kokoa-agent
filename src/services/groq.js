@@ -55,7 +55,7 @@ const ESSENTIAL_TOOLS = [
 
 const MEDIA_TOOLS = [
   'imageSearch', 'songSearch', 'youtubeSearch', 'freeMusicSearch',
-  'pipedAudioSearch', 'sendPhoto', 'sendAudio', 'sendLegalFile',
+  'youtubeMp3', 'sendPhoto', 'sendAudio', 'sendLegalFile',
 ];
 
 const MEDIA_KEYWORDS = [
@@ -197,7 +197,7 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
       : "kalo pengguna nanya status workflow github, pake `checkWorkflowStatus`. ") +
     "kalo diminta cari gambar, pake `imageSearch` lalu kirim via `sendPhoto`. " +
     "kalo diminta cari lagu, pake `songSearch` lalu kirim cuplikannya via `sendAudio` (previewUrl). kirim HANYA yang diminta user (minta audio saja -> jangan kirim photo/cover). " +
-    "kalo user mau denger full: lagu mainstream -> `youtubeSearch` lalu bagikan watchUrl-nya, ATAU `pipedAudioSearch` lalu kirim audioUrl-nya via `sendAudio` (kalau hasil ada mp3Url, kirim mp3Url itu). " +
+    "kalo user minta mp3 / mau denger full: `youtubeMp3` lalu kirim mp3Url-nya via `sendAudio` (title + performer=channel); kalau youtubeMp3 error, `youtubeSearch` lalu bagikan watchUrl-nya. " +
     "musik gratis/cc -> `freeMusicSearch` lalu kirim downloadUrl-nya via `sendAudio` full + sebut artisnya. " +
     "kalo user reply pesan orang dan minta info/impression tentang dia -> `inspectTelegramUser` pakai user_id dari konteks reply, lalu sampaikan nama/username/bio + kirim foto profilnya via `sendPhoto` (imageUrl = photoFileId).";
 

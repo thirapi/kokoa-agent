@@ -10,3 +10,4 @@ build/
 target_workspace/
 .vercel
 .env*
+mp3-cache/

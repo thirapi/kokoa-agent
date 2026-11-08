@@ -60,6 +60,21 @@ jobs:
           curl -sSf -m 30 -X POST "https://huggingface.co/api/spaces/thirapi/tg-bot-cocoa/secrets" \
             -H "Authorization: Bearer $HF_TOKEN" -H "Content-Type: application/json" -d "$body" > /dev/null
 
+      # Konverter YouTube -> MP3 pribadi (scripts/yt-mp3-server). Opsional: kalau secret
+      # GitHub-nya kosong, langkah ini dilewati dan tool youtubeMp3 fallback ke link YouTube.
+      - name: Sync MP3 converter secrets to Cloudflare Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          MP3_CONVERTER_URL: ${{ secrets.MP3_CONVERTER_URL }}
+          MP3_CONVERTER_SECRET: ${{ secrets.MP3_CONVERTER_SECRET }}
+        run: |
+          if [ -z "$MP3_CONVERTER_URL" ] || [ -z "$MP3_CONVERTER_SECRET" ]; then
+            echo "MP3_CONVERTER_URL/SECRET belum diset di GitHub Secrets, lewati"
+            exit 0
+          fi
+          printf '%s' "$MP3_CONVERTER_URL" | npx wrangler secret put MP3_CONVERTER_URL
+          printf '%s' "$MP3_CONVERTER_SECRET" | npx wrangler secret put MP3_CONVERTER_SECRET
+
       # Skema D1 idempoten (semua CREATE ... IF NOT EXISTS). Gagal = peringatan, bukan blokir deploy.
       - name: Apply D1 schema
         env:

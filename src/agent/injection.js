@@ -6,7 +6,7 @@
 
 // Konten pihak ketiga (bisa ditulis siapa saja).
 export const UNTRUSTED_TOOLS = new Set([
-  "webFetch", "webSearch", "imageSearch", "songSearch", "youtubeSearch", "freeMusicSearch", "pipedAudioSearch",
+  "webFetch", "webSearch", "imageSearch", "songSearch", "youtubeSearch", "freeMusicSearch", "youtubeMp3",
   "getPRDiff", "listGitHubIssues", "getFileContent", "readLocalFile", "grepLocalFiles", "searchInFiles",
   "inspectTelegramUser", "getTrelloBoard",
 ]);
