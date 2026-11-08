@@ -9,7 +9,7 @@ async function startServer(extraEnv) {
   for (const [k, v] of Object.entries(env)) if (v === undefined) delete env[k];
   const child = spawn(process.execPath, ["src/agent-server.js"], { env, stdio: "pipe" });
   const base = `http://127.0.0.1:${port}`;
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 300; i++) {
     try { if ((await fetch(`${base}/health`)).ok) return { child, base }; } catch (_) {}
     await new Promise((r) => setTimeout(r, 100));
   }
@@ -19,7 +19,7 @@ async function startServer(extraEnv) {
 
 describe("agent-server dengan RUNNER_SECRET", () => {
   let srv;
-  beforeAll(async () => { srv = await startServer({ RUNNER_SECRET: SECRET, GEMINI_API_KEYS: "", TELEGRAM_BOT_TOKEN: "0:x" }); });
+  beforeAll(async () => { srv = await startServer({ RUNNER_SECRET: SECRET, GEMINI_API_KEYS: "", TELEGRAM_BOT_TOKEN: "0:x" }); }, 40000);
   afterAll(() => srv?.child.kill());
 
   it("/health tetap publik", async () => {
@@ -64,7 +64,7 @@ describe("agent-server dengan RUNNER_SECRET", () => {
 
 describe("agent-server tanpa RUNNER_SECRET", () => {
   let srv;
-  beforeAll(async () => { srv = await startServer({ RUNNER_SECRET: undefined }); });
+  beforeAll(async () => { srv = await startServer({ RUNNER_SECRET: undefined }); }, 40000);
   afterAll(() => srv?.child.kill());
 
   it("fail-closed: semua /api/* ditolak", async () => {

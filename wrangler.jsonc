@@ -17,6 +17,12 @@
 	"ai": {
 		"binding": "AI"
 	},
+	"vectorize": [
+		{
+			"binding": "VECTORIZE",
+			"index_name": "kokoa-memory"
+		}
+	],
 	"kv_namespaces": [
 		{
 			"binding": "CHAT_HISTORY",

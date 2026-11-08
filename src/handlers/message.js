@@ -814,6 +814,7 @@ export async function processMessage(message, env, options = {}) {
             currentContents: [...history, { role: "user", parts: userParts }],
             historyLen: history.length,
             memories: await getAllMemories(env, chatId),
+            relevantMemories: env.__RELEVANT_MEMORIES || [],
             tasks: await getTasks(env, chatId),
             mode: await resolveAgentMode(env, chatId).catch(() => "build"),
             progressMsgId, workerUrl: env.WORKER_URL || "",
@@ -844,6 +845,16 @@ export async function processMessage(message, env, options = {}) {
       if (env.HF_SPACES_URL && (await runOnSpaces()) === 'done') return 'done';
       return 'fallthrough';
     };
+
+    // Memori semantik: cari memori yang maknanya relevan (Worker punya binding AI+Vectorize),
+    // dipakai di prompt Worker dan diteruskan ke Vercel.
+    if (userPrompt && !isSmallTalk(userPrompt)) {
+      const { searchMemories } = await import("../agent/semantic-memory.js");
+      env.__RELEVANT_MEMORIES = await Promise.race([
+        searchMemories(env, chatId, userPrompt, 4),
+        new Promise((r) => setTimeout(() => r([]), 3000)),
+      ]);
+    }
 
     const hasRemote = !!(env.VERCEL_AGENT_URL || env.HF_SPACES_URL);
     const runtime = options.forceRuntime

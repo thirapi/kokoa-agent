@@ -1,3 +1,4 @@
+import { relevantMemoriesBlock } from "../agent/semantic-memory.js";
 import { INJECTION_GUARD_PROMPT } from "../agent/injection.js";
 import { githubTools, spacesTools, trelloTools } from "../tools/definitions.js";
 import { getRecentMemories } from "../db/index.js";
@@ -196,6 +197,7 @@ export async function fetchGeminiGenerate(model, key, contents, env, chatId) {
     systemPersona,
     systemInstruction,
     memoryContext,
+    relevantMemoriesBlock(env.__RELEVANT_MEMORIES),
     (env.IS_SPACES && !isGeneralScope) ? repoContext : null,
     (env.IS_SPACES && !isGeneralScope) ? workspaceContext : null,
     scopeBanner,

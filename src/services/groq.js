@@ -1,3 +1,4 @@
+import { relevantMemoriesBlock } from "../agent/semantic-memory.js";
 import { INJECTION_GUARD_PROMPT } from "../agent/injection.js";
 import { githubTools, spacesTools, trelloTools } from "../tools/definitions.js";
 import { compactWithEvicted, evictedToText, buildSummaryMessage, buildEvictedNoteMessage } from "../agent/compaction.js";
@@ -320,6 +321,7 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
     systemPersona,
     systemInstruction,
     memoryContext,
+    relevantMemoriesBlock(env.__RELEVANT_MEMORIES),
     (env.IS_SPACES && !isGeneralScope) ? repoContext : null,
     (env.IS_SPACES && !isGeneralScope) ? workspaceContext : null,
     scopeBanner,

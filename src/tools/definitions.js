@@ -640,6 +640,18 @@ export const githubTools = [
         },
       },
       {
+        name: "searchMemory",
+        description: "Mencari memori jangka panjang berdasarkan MAKNA (bukan nama key persis). Gunakan saat butuh info tentang user/konteks tapi tidak tahu key-nya, mis. 'stack favorit', 'project yang lagi dikerjain'.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            query: { type: "STRING", description: "Apa yang ingin diingat, dalam kalimat bebas." },
+            limit: { type: "NUMBER", description: "Jumlah hasil maksimal (default 5)." },
+          },
+          required: ["query"],
+        },
+      },
+      {
         name: "recallAll",
         description: "Mengambil semua informasi yang tersimpan di memori jangka panjang untuk sesi ini. Gunakan saat butuh konteks lengkap tentang pengguna.",
         parameters: {

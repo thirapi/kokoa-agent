@@ -49,7 +49,7 @@ const noopDB = {
   batch: async () => [],
 };
 
-export function buildDetachedEnv(platformEnv, { config = {}, secrets = {}, workerUrl, memories, tasks, mode } = {}) {
+export function buildDetachedEnv(platformEnv, { config = {}, secrets = {}, workerUrl, memories, tasks, mode, relevantMemories } = {}) {
   const forwardedSecrets = {};
   for (const k of FORWARDED_SECRET_KEYS) {
     if (!platformEnv[k] && secrets?.[k]) forwardedSecrets[k] = secrets[k];
@@ -65,6 +65,7 @@ export function buildDetachedEnv(platformEnv, { config = {}, secrets = {}, worke
   };
   if (Array.isArray(memories)) env.__INJECTED_MEMORIES = memories;
   if (Array.isArray(tasks)) env.__INJECTED_TASKS = tasks;
+  if (Array.isArray(relevantMemories)) env.__RELEVANT_MEMORIES = relevantMemories;
   if (mode === "plan" || mode === "build") env.AGENT_MODE = mode;
   return env;
 }

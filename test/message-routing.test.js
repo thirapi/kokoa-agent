@@ -103,6 +103,28 @@ describe("processMessage routing", () => {
     expect(sentTexts().some((t) => /kelamaan/.test(t))).toBe(true);
   });
 
+  it("memori semantik relevan dicari di Worker, dipakai di prompt, dan ikut ke Vercel", async () => {
+    const mem = { key: "stack", value: "go + htmx" };
+    env.AI = { run: vi.fn(async () => ({ data: [[1, 2]] })) };
+    env.VECTORIZE = { query: vi.fn(async () => ({ matches: [{ score: 0.9, metadata: mem }] })) };
+    fetchGeminiGenerate.mockResolvedValueOnce(text("pakai go + htmx kayak biasanya"));
+    await processMessage(msg("bikin web todo enaknya pakai stack apa ya kalau buat aku"), env);
+    expect(fetchGeminiGenerate.mock.calls[0][3].__RELEVANT_MEMORIES).toEqual([{ ...mem, score: 0.9 }]);
+
+    env.VERCEL_AGENT_URL = "https://agent.vercel.test/api/agent"; env.WORKER_URL = "https://w";
+    fetch.mockImplementation(async (u) => new Response("{}", { status: String(u).includes("vercel") ? 202 : 200 }));
+    await processMessage(msg("tolong cek bug di repo thirapi/kokoa-agent"), env);
+    const body = JSON.parse(fetch.mock.calls.find(([u]) => String(u).includes("vercel"))[1].body);
+    expect(body.relevantMemories).toEqual([{ ...mem, score: 0.9 }]);
+  });
+
+  it("sapaan tidak memicu pencarian memori (hemat neuron)", async () => {
+    env.AI = { run: vi.fn() }; env.VECTORIZE = { query: vi.fn() };
+    fetchGeminiGenerate.mockResolvedValueOnce(text("haii"));
+    await processMessage(msg("haii"), env);
+    expect(env.VECTORIZE.query).not.toHaveBeenCalled();
+  });
+
   it("sapaan memakai model lite lebih dulu", async () => {
     env.GEMINI_MODELS = "gemini-3.6-flash,gemini-3.5-flash-lite";
     fetchGeminiGenerate.mockResolvedValueOnce(text("haii"));

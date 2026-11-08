@@ -357,7 +357,15 @@ export async function executeTool(name, args, env, chatId) {
     }
     case "remember": {
       await setMemory(env, chatId, args.key, args.value);
+      const { indexMemory } = await import("../agent/semantic-memory.js");
+      await indexMemory(env, chatId, args.key, args.value);
       return { message: `Oke, aku ingat ${args.key}: ${args.value}` };
+    }
+    case "searchMemory": {
+      const { searchMemories, semanticMemoryAvailable } = await import("../agent/semantic-memory.js");
+      if (!semanticMemoryAvailable(env)) return { error: "pencarian memori semantik tidak tersedia di runtime ini — pakai recall/recallAll" };
+      const matches = await searchMemories(env, chatId, args.query, Math.min(Number(args.limit) || 5, 10));
+      return matches.length ? { matches } : { matches: [], message: "tidak ada memori yang relevan" };
     }
     case "recall": {
       const value = await getMemory(env, chatId, args.key);
@@ -373,6 +381,8 @@ export async function executeTool(name, args, env, chatId) {
     }
     case "forget": {
       await deleteMemory(env, chatId, args.key);
+      const { forgetMemoryVector } = await import("../agent/semantic-memory.js");
+      await forgetMemoryVector(env, chatId, args.key);
       return { message: `Oke, info soal "${args.key}" udah aku hapus dari memori.` };
     }
     case "setReminder": {
