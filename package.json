@@ -10,7 +10,8 @@
     "db:create": "wrangler d1 create tg-bot-db",
     "db:init": "wrangler d1 execute tg-bot-db --file=src/db/schema.sql",
     "db:init:local": "wrangler d1 execute tg-bot-db --local --file=src/db/schema.sql",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval": "node evals/run.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

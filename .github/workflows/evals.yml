@@ -1,0 +1,50 @@
+name: Agent Evals
+
+# Menjalankan skenario perilaku agent dengan model SUNGGUHAN dan tool TIRUAN
+# (tidak ada efek ke GitHub/Telegram). Hasil ada di ringkasan run.
+on:
+  schedule:
+    - cron: "0 19 * * *" # 02:00 WIB
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "id skenario dipisah koma (kosong = semua)"
+        required: false
+      repeat:
+        description: "ulangi tiap skenario N kali"
+        required: false
+        default: "1"
+
+concurrency:
+  group: agent-evals
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --omit=dev
+      - name: Run evals
+        env:
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          EVAL_MIN_SCORE: ${{ vars.EVAL_MIN_SCORE || '0' }}
+        run: |
+          ARGS=""
+          [ -n "${{ inputs.only }}" ] && ARGS="$ARGS --only ${{ inputs.only }}"
+          node evals/run.js $ARGS --repeat "${{ inputs.repeat || '1' }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results
+          path: eval-results.json
