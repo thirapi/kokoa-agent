@@ -199,6 +199,23 @@ export async function handleWebhook(request, env, ctx) {
         };
         let lockHandedOff = false; // true = lock dilepas oleh pengantar hasil Spaces
         try {
+          if (snap.runtime === "vercel" && env.VERCEL_AGENT_URL) {
+            const { runnerAuthHeaders } = await import("../utils/auth.js");
+            const { pickForwardedConfig } = await import("../agent/detached-env.js");
+            await env.CHAT_HISTORY.delete(`hdl:${chatId}`).catch(() => {});
+            const r = await fetch(env.VERCEL_AGENT_URL, {
+              method: "POST",
+              headers: runnerAuthHeaders(env, { "Content-Type": "application/json" }),
+              body: JSON.stringify({
+                chatId: String(snap.chatId || chatId), workerUrl: env.WORKER_URL || new URL(request.url).origin,
+                config: pickForwardedConfig(env), resume: { approvalId, decision, snapshot: snap },
+              }),
+              signal: AbortSignal.timeout(20000),
+            });
+            if (r.status !== 202) throw new Error(`Vercel resume HTTP ${r.status}`);
+            lockHandedOff = true; // dilepas saat /api/agent-result mengantar hasil
+            return;
+          }
           if (snap.runtime === "spaces" && env.HF_SPACES_URL) {
             const { runnerAuthHeaders } = await import("../utils/auth.js");
             const r = await fetch(`${env.HF_SPACES_URL}/api/resume`, {

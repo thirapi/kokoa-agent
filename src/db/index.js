@@ -396,10 +396,11 @@ export async function consumeGHAContext(env, id) {
   }
 }
 
-const LOCK_TTL_SECONDS = { spaces: 300, worker: 60 };
+// Runtime jarak jauh (Spaces 240s / Vercel 270s + pengantaran) butuh lock lebih lama.
+const LOCK_TTL_SECONDS = { remote: 330, worker: 60 };
 
 export async function acquireChatLock(env, chatId) {
-  const ttlSeconds = env.HF_SPACES_URL ? LOCK_TTL_SECONDS.spaces : LOCK_TTL_SECONDS.worker;
+  const ttlSeconds = (env.HF_SPACES_URL || env.VERCEL_AGENT_URL) ? LOCK_TTL_SECONDS.remote : LOCK_TTL_SECONDS.worker;
   const now = Math.floor(Date.now() / 1000);
   try {
     const existing = await env.DB.prepare(

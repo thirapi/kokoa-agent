@@ -122,4 +122,53 @@ describe("processMessage routing", () => {
     expect(processViaSpaces).not.toHaveBeenCalled();
     expect(sentTexts().some((t) => /kelamaan/.test(t))).toBe(true);
   });
+
+  describe("dengan VERCEL_AGENT_URL", () => {
+    beforeEach(() => { env.VERCEL_AGENT_URL = "https://agent.vercel.test/api/agent"; env.WORKER_URL = "https://worker.test"; });
+
+    const vercelCalls = () => fetch.mock.calls.filter(([u]) => String(u).startsWith("https://agent.vercel.test"));
+
+    it("tugas repo dikirim ke Vercel (auth + config non-rahasia), lock dipegang, Spaces tidak disentuh", async () => {
+      fetch.mockImplementation(async (u) => new Response('{"status":"processing"}', { status: String(u).includes("vercel") ? 202 : 200 }));
+      await processMessage(msg("tolong cek bug di repo thirapi/kokoa-agent"), env);
+      const [[, init]] = vercelCalls();
+      expect(init.headers.Authorization).toBe(`Bearer ${env.RUNNER_SECRET}`);
+      const body = JSON.parse(init.body);
+      expect(body).toMatchObject({ chatId: "5", userPrompt: "tolong cek bug di repo thirapi/kokoa-agent", historyLen: 0, workerUrl: "https://worker.test" });
+      expect(body.config.AI_PROVIDERS).toBe("gemini");
+      expect(JSON.stringify(body)).not.toContain(env.GEMINI_API_KEYS + '"'); // key tidak ikut dikirim
+      expect(body.config.GEMINI_API_KEYS).toBeUndefined();
+      expect(processViaSpaces).not.toHaveBeenCalled();
+      expect(fetchGeminiGenerate).not.toHaveBeenCalled();
+      expect(db.releaseChatLock).not.toHaveBeenCalled();
+    });
+
+    it("Vercel gagal -> cadangan ke Spaces", async () => {
+      fetch.mockImplementation(async (u) => new Response("err", { status: String(u).includes("vercel") ? 500 : 200 }));
+      await processMessage(msg("tolong cek bug di repo thirapi/kokoa-agent"), env);
+      expect(vercelCalls()).toHaveLength(1);
+      expect(processViaSpaces).toHaveBeenCalledTimes(1);
+    });
+
+    it("Vercel & Spaces gagal -> dikerjakan Worker", async () => {
+      fetch.mockImplementation(async (u) => new Response("err", { status: String(u).includes("vercel") ? 500 : 200 }));
+      processViaSpaces.mockRejectedValueOnce(new Error("ECONNRESET"));
+      fetchGeminiGenerate.mockResolvedValueOnce(text("dari worker"));
+      await processMessage(msg("tolong cek bug di repo thirapi/kokoa-agent"), env);
+      expect(sentTexts().some((t) => t.includes("dari worker"))).toBe(true);
+    });
+
+    it("obrolan umum tetap di Worker", async () => {
+      fetchGeminiGenerate.mockResolvedValueOnce(text("hai"));
+      await processMessage(msg("halo cocoa lagi ngapain hari ini?"), env);
+      expect(vercelCalls()).toHaveLength(0);
+    });
+
+    it("hanya Vercel (tanpa HF) tetap dianggap punya runtime jarak jauh", async () => {
+      delete env.HF_SPACES_URL;
+      fetch.mockImplementation(async (u) => new Response("{}", { status: String(u).includes("vercel") ? 202 : 200 }));
+      await processMessage(msg("tolong cek bug di repo thirapi/kokoa-agent"), env);
+      expect(vercelCalls()).toHaveLength(1);
+    });
+  });
 });

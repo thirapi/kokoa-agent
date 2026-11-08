@@ -121,6 +121,24 @@ describe("tombol approval untuk tugas di Spaces", () => {
   });
 });
 
+describe("tombol approval untuk tugas di Vercel", () => {
+  it("✅ -> resume dikirim ke Vercel dengan snapshot & keputusan, lock dipegang sampai hasil diantar", async () => {
+    env.VERCEL_AGENT_URL = "https://agent.vercel.test/api/agent";
+    await env.CHAT_HISTORY.put("approval:ap9", JSON.stringify({
+      status: "pending",
+      snapshot: { runtime: "vercel", chatId: "111", contents: [], pending: { tool: "mergePullRequest", key: "k" } },
+    }));
+    globalThis.fetch.mockImplementation(async (u) => new Response("{}", { status: String(u).includes("vercel") ? 202 : 200 }));
+    const cb = { update_id: 901, callback_query: { id: "q", data: "approve:ap9", from: { id: 111 }, message: { message_id: 3, chat: { id: 111, type: "private" } } } };
+    await handleWebhook(post(cb), env, ctx);
+    await ctx.flush();
+    const call = globalThis.fetch.mock.calls.find(([u]) => String(u) === env.VERCEL_AGENT_URL);
+    expect(call[1].headers.Authorization).toBe(`Bearer ${env.RUNNER_SECRET}`);
+    expect(JSON.parse(call[1].body)).toMatchObject({ chatId: "111", resume: { approvalId: "ap9", decision: "approve", snapshot: { runtime: "vercel" } } });
+    expect(db.releaseChatLock).not.toHaveBeenCalled();
+  });
+});
+
 describe("isBotMentioned", () => {
   const bot = { username: "kokoa_bot", id: 42 };
   it("mention bot", () => {

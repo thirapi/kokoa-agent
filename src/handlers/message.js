@@ -12,7 +12,7 @@ import { runHarnessToolCall, isWriteTool, modifiesRepoFiles } from "../tools/har
 import { validateToolArgs, isReadOnlyTool } from "../agent/registry.js";
 import { detectScope, extractLatestUserText, recentUserTexts, isRepoTool } from "../agent/scope.js";
 import { resolveAgentMode } from "../agent/mode.js";
-import { chooseRuntime, shouldRetryOnSpaces } from "../agent/route.js";
+import { chooseRuntime, shouldRetryRemote } from "../agent/route.js";
 import {
   needsApproval, toolCallKey, ApprovalPending,
   saveApproval, stripMediaForSnapshot, approvalButtons, approvalPromptText,
@@ -816,11 +816,67 @@ export async function processMessage(message, env, options = {}) {
       return 'fallthrough';
     };
 
-    const hasSpaces = !!env.HF_SPACES_URL;
+    // Vercel: maks 300 detik, egress bebas (Telegram/AI/GitHub/Worker lancar).
+    // Hasil dikirim balik ke Worker lewat /api/agent-result.
+    const runOnVercel = async () => {
+      let progressMsgId = null;
+      try {
+        const { sendTelegramMessage } = await import("../services/telegram.js");
+        const sent = await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, "Cocoa sedang bekerja... ⏳");
+        progressMsgId = sent && sent.length > 0 && sent[0].message_id ? String(sent[0].message_id) : null;
+        if (progressMsgId) {
+          await env.CHAT_HISTORY.put(`progress_msg:${chatId}`, progressMsgId, { expirationTtl: 600 });
+        }
+        if (!mediaData) {
+          await env.CHAT_HISTORY.put(`spaces_prompt:${chatId}`, userPrompt, { expirationTtl: 3600 }).catch(() => {});
+        }
+        await env.CHAT_HISTORY.delete(`hdl:${chatId}`).catch(() => {});
+        const { pickForwardedConfig } = await import("../agent/detached-env.js");
+        const { runnerAuthHeaders } = await import("../utils/auth.js");
+        const userParts = [{ text: userPrompt }];
+        if (mediaData) userParts.push(mediaData);
+        const res = await fetch(env.VERCEL_AGENT_URL, {
+          method: "POST",
+          headers: runnerAuthHeaders(env, { "Content-Type": "application/json" }),
+          signal: AbortSignal.timeout(20000),
+          body: JSON.stringify({
+            chatId, userPrompt,
+            currentContents: [...history, { role: "user", parts: userParts }],
+            historyLen: history.length,
+            memories: await getAllMemories(env, chatId),
+            tasks: await getTasks(env, chatId),
+            mode: await resolveAgentMode(env, chatId).catch(() => "build"),
+            progressMsgId, workerUrl: env.WORKER_URL || "",
+            config: pickForwardedConfig(env),
+          }),
+        });
+        if (res.status !== 202) throw new Error(`Vercel HTTP ${res.status}`);
+        shouldReleaseLock = false; // dilepas saat /api/agent-result mengantar hasil
+        console.log(`[Route] chat ${chatId} diproses di Vercel`);
+        return 'done';
+      } catch (e) {
+        console.error(`[Route] Vercel gagal untuk chat ${chatId}:`, e.message);
+        if (progressMsgId) {
+          const { deleteTelegramMessage } = await import("../services/telegram.js");
+          await deleteTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, parseInt(progressMsgId)).catch(() => {});
+          await env.CHAT_HISTORY.delete(`progress_msg:${chatId}`).catch(() => {});
+        }
+        return 'fallthrough';
+      }
+    };
+
+    // Urutan runtime jarak jauh: Vercel -> HF Spaces -> (fallthrough) Worker.
+    const runRemote = async () => {
+      if (env.VERCEL_AGENT_URL && (await runOnVercel()) === 'done') return 'done';
+      if (env.HF_SPACES_URL && (await runOnSpaces()) === 'done') return 'done';
+      return 'fallthrough';
+    };
+
+    const hasRemote = !!(env.VERCEL_AGENT_URL || env.HF_SPACES_URL);
     const runtime = options.forceRuntime
-      || chooseRuntime({ hasSpaces, userPrompt, historyTexts: recentUserTexts(history, 3) });
+      || chooseRuntime({ hasRemote, userPrompt, historyTexts: recentUserTexts(history, 3) });
     console.log(`[Route] chat ${chatId} -> ${runtime}`);
-    if (runtime === 'spaces' && (await runOnSpaces()) === 'done') return;
+    if (runtime === 'remote' && (await runRemote()) === 'done') return;
 
     const providerConfigs = await buildProviderConfigs(env);
     if (providerConfigs.length === 0) {
@@ -843,10 +899,10 @@ export async function processMessage(message, env, options = {}) {
       );
     } catch (err) {
       // Worker kehabisan waktu & belum ada efek samping -> ulangi di Spaces (budget 240 detik).
-      // forceRuntime = ini SUDAH fallback dari Spaces; jangan pantulkan balik ke sana.
-      if (runtime === 'worker' && !options.forceRuntime && shouldRetryOnSpaces(err, hasSpaces)) {
-        console.warn(`[Route] Worker timeout untuk chat ${chatId}, dialihkan ke Spaces`);
-        if ((await runOnSpaces()) === 'done') return;
+      // forceRuntime = ini SUDAH fallback dari runtime jarak jauh; jangan pantulkan balik.
+      if (runtime === 'worker' && !options.forceRuntime && shouldRetryRemote(err, hasRemote)) {
+        console.warn(`[Route] Worker timeout untuk chat ${chatId}, dialihkan ke runtime jarak jauh`);
+        if ((await runRemote()) === 'done') return;
       }
       throw err;
     }

@@ -146,13 +146,15 @@ export async function handleSpacesResult(env, chatId, data, progressMsgId, opts 
 
   }
 
-  try {
-    await fetch(`${env.HF_SPACES_URL}/api/result?chatId=${encodeURIComponent(chatId)}`, {
-      method: 'DELETE',
-      headers: runnerAuthHeaders(env),
-      signal: AbortSignal.timeout(10000),
-    });
-  } catch (_) {}
+  if (env.HF_SPACES_URL && opts.source !== 'vercel') {
+    try {
+      await fetch(`${env.HF_SPACES_URL}/api/result?chatId=${encodeURIComponent(chatId)}`, {
+        method: 'DELETE',
+        headers: runnerAuthHeaders(env),
+        signal: AbortSignal.timeout(10000),
+      });
+    } catch (_) {}
+  }
 
   await env.CHAT_HISTORY.put(`callback_done:${chatId}`, "1", { expirationTtl: 300 }).catch(() => {});
   await env.CHAT_HISTORY.delete(`hdl:${chatId}`).catch(() => {});

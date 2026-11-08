@@ -8,12 +8,18 @@ vi.mock("../src/db/index.js", () => ({
   addHistory: vi.fn(), trimHistory: vi.fn(),
 }));
 
+vi.mock("../src/services/spaces-poll.js", () => ({ handleSpacesResult: vi.fn(async () => ({ retryable: false })) }));
+vi.mock("../src/handlers/message.js", () => ({ processMessage: vi.fn(async () => {}) }));
+
 import * as db from "../src/db/index.js";
+import { handleSpacesResult } from "../src/services/spaces-poll.js";
+import { processMessage } from "../src/handlers/message.js";
 import { handleAPI } from "../src/handlers/api.js";
 import worker from "../src/index.js";
 import { baseEnv, fakeCtx, req, bearer } from "./helpers.js";
 
 const PROTECTED = [
+  ["POST", "/api/agent-result"],
   ["POST", "/api/runner-callback"],
   ["GET", "/api/context/abc"],
   ["PUT", "/api/context/abc"],
@@ -120,5 +126,41 @@ describe("router utama (src/index.js)", () => {
   it("/api/* diarahkan ke handleAPI", async () => {
     const res = await worker.fetch(req("/api/health"), baseEnv(), fakeCtx());
     expect(res.status).toBe(200);
+  });
+});
+
+describe("/api/agent-result (hasil dari Vercel)", () => {
+  const post = (env, body) => handleAPI(req("/api/agent-result", { method: "POST", auth: bearer(), body }), env, ctxRef.ctx);
+  const ctxRef = {};
+  beforeEach(() => { ctxRef.ctx = fakeCtx(); });
+
+  it("mengantar hasil lewat jalur yang sama dengan Spaces (source=vercel)", async () => {
+    const env = baseEnv();
+    const res = await post(env, { chatId: 7, data: { finalText: "halo", progressMsgId: "55" } });
+    expect(res.status).toBe(200);
+    await ctxRef.ctx.flush();
+    expect(handleSpacesResult).toHaveBeenCalledWith(env, "7", { finalText: "halo", progressMsgId: "55" }, "55",
+      { source: "vercel", fallbackOnRetryable: false });
+  });
+
+  it("pengiriman ganda (retry Vercel) hanya diproses sekali", async () => {
+    const env = baseEnv();
+    await post(env, { chatId: 7, data: { finalText: "a" } });
+    await post(env, { chatId: 7, data: { finalText: "a" } });
+    await ctxRef.ctx.flush();
+    expect(handleSpacesResult).toHaveBeenCalledTimes(1);
+  });
+
+  it("gagal jaringan & prompt tersimpan -> dikerjakan ulang di Worker", async () => {
+    const env = baseEnv();
+    await env.CHAT_HISTORY.put("spaces_prompt:7", "cek repo x");
+    handleSpacesResult.mockResolvedValueOnce({ retryable: true });
+    await post(env, { chatId: 7, data: { error: "fetch failed" } });
+    await ctxRef.ctx.flush();
+    expect(processMessage).toHaveBeenCalledWith({ chat: { id: "7" }, text: "cek repo x" }, env, { forceRuntime: "worker" });
+  });
+
+  it("validasi body", async () => {
+    expect((await post(baseEnv(), { data: {} })).status).toBe(400);
   });
 });

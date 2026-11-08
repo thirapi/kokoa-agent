@@ -13,7 +13,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.1"
+    "@google/generative-ai": "^0.24.1",
+    "@vercel/functions": "^3.11.0"
   },
   "devDependencies": {
     "vitest": "^3.2.7",

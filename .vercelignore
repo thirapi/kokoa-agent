@@ -1,0 +1,11 @@
+node_modules
+.wrangler
+.github
+test
+docs
+scripts
+discord
+target_workspace
+web
+Dockerfile
+*.md

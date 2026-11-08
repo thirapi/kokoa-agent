@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { chooseRuntime, shouldRetryOnSpaces, isSmallTalk, isRetryableSpacesError } from "../src/agent/route.js";
+import { chooseRuntime, shouldRetryRemote, isSmallTalk, isRetryableSpacesError } from "../src/agent/route.js";
 import { hasRepoSignal, detectScope } from "../src/agent/scope.js";
 
-const route = (userPrompt, historyTexts = [], hasSpaces = true) =>
-  chooseRuntime({ hasSpaces, userPrompt, historyTexts });
+const route = (userPrompt, historyTexts = [], hasRemote = true) =>
+  chooseRuntime({ hasRemote, userPrompt, historyTexts });
 
 describe("chooseRuntime", () => {
   it("selalu Worker kalau Spaces tidak dikonfigurasi", () => {
@@ -17,13 +17,13 @@ describe("chooseRuntime", () => {
   });
 
   it("tugas repo/kode dikirim ke Spaces", () => {
-    expect(route("tolong cek bug di repo thirapi/kokoa-agent")).toBe("spaces");
-    expect(route("jalankan npm test di project ini")).toBe("spaces");
-    expect(route("init project go +htmx di thirapi/htmx")).toBe("spaces");
+    expect(route("tolong cek bug di repo thirapi/kokoa-agent")).toBe("remote");
+    expect(route("jalankan npm test di project ini")).toBe("remote");
+    expect(route("init project go +htmx di thirapi/htmx")).toBe("remote");
   });
 
   it("pesan lanjutan ikut topik sebelumnya", () => {
-    expect(route("oke lanjut", ["tolong fix bug di repo thirapi/x"])).toBe("spaces");
+    expect(route("oke lanjut", ["tolong fix bug di repo thirapi/x"])).toBe("remote");
     expect(route("oke lanjut", ["halo cocoa", "rekomendasi film dong"])).toBe("worker");
     expect(route("oke", [])).toBe("worker");
   });
@@ -34,19 +34,19 @@ describe("chooseRuntime", () => {
   });
 });
 
-describe("shouldRetryOnSpaces", () => {
+describe("shouldRetryRemote", () => {
   const timeout = (stateMutated) => Object.assign(new Error("t"), { code: "EXECUTION_TIMEOUT", stateMutated });
 
   it("retry hanya untuk timeout tanpa efek samping", () => {
-    expect(shouldRetryOnSpaces(timeout(false), true)).toBe(true);
-    expect(shouldRetryOnSpaces(timeout(true), true)).toBe(false);
+    expect(shouldRetryRemote(timeout(false), true)).toBe(true);
+    expect(shouldRetryRemote(timeout(true), true)).toBe(false);
   });
 
   it("tidak retry tanpa Spaces atau untuk error lain", () => {
-    expect(shouldRetryOnSpaces(timeout(false), false)).toBe(false);
-    expect(shouldRetryOnSpaces(new Error("429"), true)).toBe(false);
-    expect(shouldRetryOnSpaces(Object.assign(new Error(), { code: "EXECUTION_TIMEOUT" }), true)).toBe(false);
-    expect(shouldRetryOnSpaces(null, true)).toBe(false);
+    expect(shouldRetryRemote(timeout(false), false)).toBe(false);
+    expect(shouldRetryRemote(new Error("429"), true)).toBe(false);
+    expect(shouldRetryRemote(Object.assign(new Error(), { code: "EXECUTION_TIMEOUT" }), true)).toBe(false);
+    expect(shouldRetryRemote(null, true)).toBe(false);
   });
 });
 
@@ -78,8 +78,8 @@ describe("sapaan tidak pernah dikirim ke Spaces", () => {
     "%s -> Worker", (t) => expect(route(t, repoHistory)).toBe("worker"));
 
   it("lanjutan tugas tetap ke Spaces", () => {
-    expect(route("oke lanjut", repoHistory)).toBe("spaces");
-    expect(route("coba lagi", repoHistory)).toBe("spaces");
+    expect(route("oke lanjut", repoHistory)).toBe("remote");
+    expect(route("coba lagi", repoHistory)).toBe("remote");
   });
 
   it("isSmallTalk tidak salah tangkap kalimat tugas", () => {

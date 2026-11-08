@@ -30,6 +30,32 @@ export async function handleAPI(request, env, ctx) {
     return new Response("Unauthorized", { status: 401 });
   }
 
+  // Hasil agent dari Vercel (POST oleh api/agent.js). Diantar persis seperti hasil Spaces:
+  // simpan riwayat, kirim jawaban/approval, lepas lock, proses antrean.
+  if (path === "/api/agent-result") {
+    if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+    let body;
+    try { body = await request.json(); } catch (_) { return new Response("Bad JSON", { status: 400 }); }
+    const chatId = body?.chatId ? String(body.chatId) : "";
+    if (!chatId || !body.data) return new Response("Missing chatId/data", { status: 400 });
+    const mutexKey = `hdl:${chatId}`;
+    if (await env.CHAT_HISTORY.get(mutexKey)) return new Response("Already handled", { status: 200 });
+    await env.CHAT_HISTORY.put(mutexKey, "1", { expirationTtl: 120 });
+    ctx.waitUntil((async () => {
+      const { handleSpacesResult } = await import("../services/spaces-poll.js");
+      // Gagal karena jaringan/provider & prompt tersimpan -> kerjakan ulang di Worker.
+      const retryPrompt = await env.CHAT_HISTORY.get(`spaces_prompt:${chatId}`);
+      const { retryable } = await handleSpacesResult(env, chatId, body.data, body.data.progressMsgId,
+        { source: "vercel", fallbackOnRetryable: !!retryPrompt }) || {};
+      if (retryable) {
+        await env.CHAT_HISTORY.delete(`spaces_prompt:${chatId}`).catch(() => {});
+        const { processMessage } = await import("./message.js");
+        await processMessage({ chat: { id: chatId }, text: retryPrompt }, env, { forceRuntime: "worker" });
+      }
+    })());
+    return new Response("OK", { status: 200 });
+  }
+
   if (path === "/api/runner-callback") {
     if (request.method !== "POST") {
       return new Response("Method Not Allowed", { status: 405 });

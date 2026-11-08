@@ -5,6 +5,7 @@
 | Runtime | Peran | Batas |
 |---|---|---|
 | **Cloudflare Worker** (`src/index.js`) | Pintu masuk webhook Telegram, D1/KV, lock per chat, cron (reminder + polling Spaces), proxy AI/Telegram untuk Spaces, **dan agent loop untuk pesan umum** | ~23 detik per loop |
+| **Vercel** (`api/agent.js`) | Agent loop untuk tugas repo/kode & tugas panjang. Egress bebas (Telegram, AI, GitHub, Worker — diukur 5/5). Aktif bila Worker punya `VERCEL_AGENT_URL` | 300 detik per function (loop 270 detik) |
 | **HF Spaces** (`src/agent-server.js`) | Agent loop untuk tugas repo/kode: shell (`runCommand`), clone repo, baca file lokal | 240 detik per loop, Space bisa tidur/restart |
 | **GitHub Actions** (`.github/workflows/kokoa-dev.yml`) | Tugas berat: implementasi fitur + commit + PR, analisis repo besar | 30 menit per run |
 
@@ -16,8 +17,10 @@ Telegram ──► Worker (webhook: verifikasi secret, allowlist, dedupe, rate l
                ├─ pesan umum (ngobrol, cari info, reminder) ──► agent loop di Worker
                │        └─ timeout & belum ada tool yang mengubah state ──► ulang di Spaces
                │
-               └─ tugas repo/kode (atau lanjutan dari topik repo) ──► HF Spaces
-                        ├─ Spaces gagal/tak terjangkau ──► fallback agent loop di Worker
+               └─ tugas repo/kode (atau lanjutan dari topik repo) ──► Vercel (api/agent.js)
+                        │    └─ hasil ──► POST Worker /api/agent-result ──► Telegram + D1
+                        ├─ Vercel gagal ──► HF Spaces (cadangan)
+                        ├─ keduanya gagal ──► fallback agent loop di Worker
                         └─ butuh commit/PR/kerja berat ──► triggerDeveloperWorkflow ──► GitHub Actions
 ```
 
