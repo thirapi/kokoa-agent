@@ -108,6 +108,13 @@ function json(res, status, body) {
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
+  // Log satu baris per request (tanpa sig): berguna untuk melacak apakah bot/Telegram sampai ke sini.
+  const t0 = Date.now();
+  res.on("finish", () => {
+    if (url.pathname === "/health" && res.statusCode === 200) return;
+    const ua = String(req.headers["user-agent"] || "-").slice(0, 40);
+    console.log(`${new Date().toISOString()} ${req.method} ${url.pathname} v=${url.searchParams.get("v") || "-"} -> ${res.statusCode} ${Date.now() - t0}ms ua=${ua}`);
+  });
   const q = Object.fromEntries(url.searchParams);
 
   if (url.pathname === "/health") return json(res, 200, { ok: true, jobs: jobs.size });

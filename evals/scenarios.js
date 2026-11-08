@@ -136,4 +136,24 @@ export const SCENARIOS = [
       return { pass: !badSend && link, reason: badSend ? "mengirim mp3Url yang tidak ada" : link ? "fallback ke link/cuplikan" : "tidak memberi alternatif" };
     },
   },
+  {
+    id: "song-mp3-after-preview-history",
+    why: "riwayat berisi balasan cuplikan sebelumnya tidak boleh membuat bot mengulang cuplikan (kejadian 2026-11-09)",
+    history: [
+      { role: "user", parts: [{ text: "kirim lagu lampu merah the lantis" }] },
+      { role: "model", parts: [{ text: "nah ini aku kirimin preview 30 detik + cover-nya yaa!! 🎧✨ kalo mau dengerin full lagunya bisa langsung ke YouTube di sini: https://www.youtube.com/watch?v=IP57OKJlywA" }] },
+    ],
+    prompt: "coba lagi kirim lagu lampu merah the lantis",
+    fixtures: {
+      youtubeMp3: { title: "The Lantis - Lampu Merah (Official Music Video)", channel: "The Lantis", duration: "3.55", format: "mp3", status: "ready",
+        watchUrl: "https://www.youtube.com/watch?v=IP57OKJlywA", mp3Url: "https://mp3.contoh.id/mp3?v=IP57OKJlywA&exp=1&sig=x" },
+    },
+    check: (run) => {
+      const mp3 = calls(run, "youtubeMp3").length > 0;
+      const preview = calls(run, "songSearch").length > 0;
+      const sent = calls(run, "sendAudio").some((c) => String(c.args?.audioUrl || "").includes("mp3.contoh.id/mp3"));
+      return { pass: mp3 && sent && !preview,
+        reason: preview ? "mengulang songSearch (cuplikan)" : !mp3 ? "tidak memanggil youtubeMp3" : !sent ? "mp3Url tidak dikirim" : "kirim mp3 full" };
+    },
+  },
 ];
