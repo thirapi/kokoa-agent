@@ -5,6 +5,7 @@
 	"compatibility_date": "2026-06-01",
 	"vars": {
 		"WORKER_URL": "https://tg-bot.thirapi.workers.dev",
+		"VERCEL_AGENT_URL": "https://kokoa-agent.vercel.app/api/agent",
 		"GROQ_ENABLED": "false",
 		"AI_PROVIDERS": "gemini,cerebras,openrouter,groq,workersai",
 		"GEMINI_MODELS": "gemini-3.6-flash,gemini-3.5-flash-lite,gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3-flash-preview",

@@ -136,7 +136,10 @@ describe("processMessage routing", () => {
       const body = JSON.parse(init.body);
       expect(body).toMatchObject({ chatId: "5", userPrompt: "tolong cek bug di repo thirapi/kokoa-agent", historyLen: 0, workerUrl: "https://worker.test" });
       expect(body.config.AI_PROVIDERS).toBe("gemini");
-      expect(JSON.stringify(body)).not.toContain(env.GEMINI_API_KEYS + '"'); // key tidak ikut dikirim
+      // key provider ikut di kanal ber-auth (Worker = satu-satunya sumber secret)...
+      expect(body.secrets).toMatchObject({ GEMINI_API_KEYS: "k1", TELEGRAM_BOT_TOKEN: "000:TEST" });
+      // ...tapi RUNNER_SECRET & binding tidak pernah ikut
+      expect(body.secrets.RUNNER_SECRET).toBeUndefined();
       expect(body.config.GEMINI_API_KEYS).toBeUndefined();
       expect(processViaSpaces).not.toHaveBeenCalled();
       expect(fetchGeminiGenerate).not.toHaveBeenCalled();

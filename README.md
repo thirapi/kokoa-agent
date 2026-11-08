@@ -15,12 +15,18 @@ AI processor untuk Telegram bot. Menerima request dari Cloudflare Worker, menjal
 
 Repo & Space ini publik, jadi **semua** secret hanya boleh lewat env.
 
-`RUNNER_SECRET` (acak, min 16 karakter) cukup diset sekali di GitHub Secrets;
+`RUNNER_SECRET` (acak, min 16 karakter) diset di GitHub Secrets **dan** Vercel;
 workflow deploy menyebarkannya otomatis ke Cloudflare Worker & HF Space:
 
 ```bash
-gh secret set RUNNER_SECRET --body "$(openssl rand -hex 32)"
+S=$(openssl rand -hex 32)
+gh secret set RUNNER_SECRET --body "$S"
+printf %s "$S" | npx vercel env add RUNNER_SECRET production --force
+npx vercel deploy --prod   # env Vercel baru terbaca setelah deploy ulang
 ```
+
+Key provider (Gemini, Cerebras, dll) cukup ada di Cloudflare Worker: Worker meneruskannya
+ke Vercel per job lewat kanal ber-auth `RUNNER_SECRET`, jadi Vercel tidak perlu menyimpannya.
 
 ## Provider AI
 

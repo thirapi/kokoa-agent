@@ -2,13 +2,26 @@
 // tidak ada binding KV/D1 — riwayat, memori & task dikirim Worker di request,
 // dan hasilnya dikembalikan ke Worker untuk disimpan.
 
-// Konfigurasi non-rahasia yang boleh dikirim Worker per request (persona, model,
-// urutan provider). Secret TIDAK pernah lewat sini — diambil dari env platform.
+// Konfigurasi non-rahasia yang dikirim Worker per request (persona, model, urutan provider).
 export const FORWARDED_CONFIG_KEYS = [
   "GEMINI_SYSTEM_PERSONA", "GEMINI_SYSTEM_INSTRUCTION", "GEMINI_MODELS", "GROQ_MODELS",
   "GROQ_ENABLED", "OPENROUTER_MODELS", "CEREBRAS_MODELS", "WORKERS_AI_MODELS", "AI_PROVIDERS",
   "BOT_USERNAME", "SEARXNG_INSTANCE", "GHA_DISPATCH_REPO",
 ];
+
+// Key provider yang diteruskan Worker per job (Worker = satu-satunya sumber secret;
+// runtime jarak jauh cukup menyimpan RUNNER_SECRET). Kanal: HTTPS + Bearer RUNNER_SECRET.
+// Nilai yang sudah diset di env platform tetap diutamakan.
+export const FORWARDED_SECRET_KEYS = [
+  "GEMINI_API_KEYS", "GROQ_API_KEY", "OPENROUTER_API_KEY", "CEREBRAS_API_KEY",
+  "GITHUB_PAT_TOKEN", "TELEGRAM_BOT_TOKEN", "TRELLO_API_KEY", "TRELLO_TOKEN", "TRELLO_BOARD_ID",
+];
+
+export function pickForwardedSecrets(env) {
+  const out = {};
+  for (const k of FORWARDED_SECRET_KEYS) if (env?.[k]) out[k] = env[k];
+  return out;
+}
 
 export function pickForwardedConfig(env) {
   const out = {};
@@ -36,9 +49,14 @@ const noopDB = {
   batch: async () => [],
 };
 
-export function buildDetachedEnv(platformEnv, { config = {}, workerUrl, memories, tasks, mode } = {}) {
+export function buildDetachedEnv(platformEnv, { config = {}, secrets = {}, workerUrl, memories, tasks, mode } = {}) {
+  const forwardedSecrets = {};
+  for (const k of FORWARDED_SECRET_KEYS) {
+    if (!platformEnv[k] && secrets?.[k]) forwardedSecrets[k] = secrets[k];
+  }
   const env = {
     ...platformEnv,
+    ...forwardedSecrets,
     ...pickForwardedConfig(config),
     WORKER_URL: workerUrl || platformEnv.WORKER_URL || "",
     CHAT_HISTORY: memoryKV(),

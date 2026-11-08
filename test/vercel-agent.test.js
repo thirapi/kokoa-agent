@@ -15,13 +15,14 @@ import { SECRET, bearer } from "./helpers.js";
 
 const text = (t) => ({ candidates: [{ content: { role: "model", parts: [{ text: t }] } }] });
 const call = (name, args = {}) => ({ candidates: [{ content: { role: "model", parts: [{ functionCall: { name, args } }] } }] });
-const platform = { RUNNER_SECRET: SECRET, GEMINI_API_KEYS: "k", GEMINI_MODELS: "m", AI_PROVIDERS: "gemini", TELEGRAM_BOT_TOKEN: "0:x" };
+const platform = { RUNNER_SECRET: SECRET, GEMINI_MODELS: "m", AI_PROVIDERS: "gemini" };
 const job = (extra = {}) => ({
   chatId: 7, userPrompt: "cek bug di repo thirapi/x",
   currentContents: [{ role: "user", parts: [{ text: "lama" }] }, { role: "model", parts: [{ text: "ok" }] },
     { role: "user", parts: [{ text: "cek bug di repo thirapi/x" }] }],
   historyLen: 2, memories: [{ key: "nama", value: "faiq" }], tasks: [], mode: "build", progressMsgId: "55",
-  workerUrl: "https://worker.test", config: { GEMINI_SYSTEM_PERSONA: "kamu cocoa" }, ...extra,
+  workerUrl: "https://worker.test", config: { GEMINI_SYSTEM_PERSONA: "kamu cocoa" },
+  secrets: { GEMINI_API_KEYS: "k", TELEGRAM_BOT_TOKEN: "0:x", GITHUB_PAT_TOKEN: "gh" }, ...extra,
 });
 
 beforeEach(() => {
@@ -33,6 +34,19 @@ describe("detached env", () => {
   it("hanya meneruskan config non-rahasia dari Worker", () => {
     const cfg = pickForwardedConfig({ GEMINI_SYSTEM_PERSONA: "p", AI_PROVIDERS: "gemini", TELEGRAM_BOT_TOKEN: "rahasia", RUNNER_SECRET: "x", GEMINI_API_KEYS: "k" });
     expect(cfg).toEqual({ GEMINI_SYSTEM_PERSONA: "p", AI_PROVIDERS: "gemini" });
+  });
+
+  it("key provider dari Worker dipakai bila env platform kosong; RUNNER_SECRET tidak bisa diteruskan", () => {
+    const env = buildDetachedEnv({ RUNNER_SECRET: "platform" }, {
+      secrets: { GEMINI_API_KEYS: "dari-worker", RUNNER_SECRET: "palsu", CHAT_HISTORY: "x" },
+    });
+    expect(env.GEMINI_API_KEYS).toBe("dari-worker");
+    expect(env.RUNNER_SECRET).toBe("platform");
+    expect(typeof env.CHAT_HISTORY.get).toBe("function");
+  });
+
+  it("env platform menang atas key yang diteruskan", () => {
+    expect(buildDetachedEnv({ GEMINI_API_KEYS: "platform" }, { secrets: { GEMINI_API_KEYS: "worker" } }).GEMINI_API_KEYS).toBe("platform");
   });
 
   it("config dari request tidak bisa menimpa secret platform", () => {
@@ -66,7 +80,7 @@ describe("executeRemoteJob", () => {
     fetchGeminiGenerate.mockResolvedValueOnce(call("mergePullRequest", { owner: "thirapi", repo: "x", pull_number: 3 }));
     const first = await executeRemoteJob(job(), platform);
     fetchGeminiGenerate.mockResolvedValueOnce(text("PR udah di-merge"));
-    const data = await executeRemoteJob({ chatId: 7, workerUrl: "https://worker.test",
+    const data = await executeRemoteJob({ chatId: 7, workerUrl: "https://worker.test", secrets: job().secrets,
       resume: { decision: "approve", snapshot: first.approval.snapshot } }, platform);
     expect(data.finalText).toBe("PR udah di-merge");
     const { callGitHubAPI } = await import("../src/services/github.js");

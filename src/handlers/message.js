@@ -831,7 +831,7 @@ export async function processMessage(message, env, options = {}) {
           await env.CHAT_HISTORY.put(`spaces_prompt:${chatId}`, userPrompt, { expirationTtl: 3600 }).catch(() => {});
         }
         await env.CHAT_HISTORY.delete(`hdl:${chatId}`).catch(() => {});
-        const { pickForwardedConfig } = await import("../agent/detached-env.js");
+        const { pickForwardedConfig, pickForwardedSecrets } = await import("../agent/detached-env.js");
         const { runnerAuthHeaders } = await import("../utils/auth.js");
         const userParts = [{ text: userPrompt }];
         if (mediaData) userParts.push(mediaData);
@@ -848,6 +848,7 @@ export async function processMessage(message, env, options = {}) {
             mode: await resolveAgentMode(env, chatId).catch(() => "build"),
             progressMsgId, workerUrl: env.WORKER_URL || "",
             config: pickForwardedConfig(env),
+            secrets: pickForwardedSecrets(env),
           }),
         });
         if (res.status !== 202) throw new Error(`Vercel HTTP ${res.status}`);
