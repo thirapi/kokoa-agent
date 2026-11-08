@@ -10,6 +10,7 @@ import { executeSpacesTool, isSpacesTool } from './tools/spaces-executor.js';
 import { ApprovalPending } from './agent/approval.js';
 import { isAuthorizedHeader, getRunnerSecret } from './utils/auth.js';
 import { triggerProbe } from './utils/egress-probe.js';
+import { createTracer } from './agent/trace.js';
 
 const RUNNER_SECRET = getRunnerSecret(process.env);
 if (!RUNNER_SECRET) {
@@ -184,7 +185,7 @@ async function proxyFinalText(proxyTelegram, stringChatId, finalText) {
 // Riwayat chat disimpan Worker sendiri saat mengambil hasil (poll/cron).
 // Hasil baru dipublikasikan SETELAH percobaan kirim selesai, supaya Worker tidak
 // ikut mengirim jawaban yang sama (dobel).
-async function finishSpacesResult(stringChatId, { finalText, newContent, escalationTriggered, progressMsgId, filesModified }, proxyTelegram) {
+async function finishSpacesResult(stringChatId, { finalText, newContent, escalationTriggered, progressMsgId, filesModified, runtime, prompt, trace, durationMs }, proxyTelegram) {
   let proxySent = false;
   if (lastWorkerUrl && finalText) {
     try {
@@ -201,6 +202,7 @@ async function finishSpacesResult(stringChatId, { finalText, newContent, escalat
     filesModified: filesModified ?? null,
     error: null,
     proxySent,
+    runtime, prompt, trace, durationMs,
     historySynced: false,
     pendingMedia: takePendingMedia(stringChatId),
     progressMsgId: progressMsgId || null,
@@ -400,6 +402,8 @@ const server = createServer(async (req, res) => {
         }
 
         const approvalCap = captureApproval();
+        const tracer = createTracer();
+        const traceFields = () => ({ runtime: 'spaces', prompt: userPrompt || '', trace: tracer.events, durationMs: Date.now() - tracer.startedAt });
         try {
           const originalHistoryLength = rawContents ? rawContents.length - 1 : 0;
           const currentContents = rawContents || [{ role: 'user', parts: [{ text: userPrompt || '' }] }];
@@ -436,7 +440,7 @@ const server = createServer(async (req, res) => {
             providerConfigs, [], startTime,
             {
               executionTimeout: 240000, iterationTimeout: 30000, toolExecutor: hybridExecutor,
-              runtime: 'spaces',
+              runtime: 'spaces', tracer,
               saveSnapshot: approvalCap.saveSnapshot,
               notifyApproval: approvalCap.notifyApproval,
             }
@@ -463,12 +467,13 @@ const server = createServer(async (req, res) => {
             escalationTriggered: result.escalationTriggered,
             progressMsgId,
             filesModified: result.filesModified,
+            ...traceFields(),
           }, proxyTelegram);
           console.log(`[Spaces] Result stored for chat ${stringChatId}`);
 
         } catch (err) {
           if (err instanceof ApprovalPending || err?.message === '__APPROVAL_PENDING__') {
-            resultsStore.set(stringChatId, approvalResult(approvalCap.box, progressMsgId));
+            resultsStore.set(stringChatId, { ...approvalResult(approvalCap.box, progressMsgId), ...traceFields() });
             console.log(`[Spaces] Loop paused awaiting approval ${err.approvalId} for chat ${stringChatId}`);
             return;
           }
@@ -483,7 +488,8 @@ const server = createServer(async (req, res) => {
             proxySent: false,
             pendingMedia: takePendingMedia(stringChatId),
             progressMsgId: progressMsgId || null,
-            ts: Date.now()
+            ts: Date.now(),
+            ...traceFields(),
           };
           resultsStore.set(stringChatId, errorResult);
           console.log(`[Spaces] Error result stored for chat ${stringChatId}`);

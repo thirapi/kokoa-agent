@@ -8,6 +8,8 @@ vi.mock("../src/services/telegram.js", () => ({
 vi.mock("../src/db/index.js", () => ({
   clearHistory: vi.fn(), acquireChatLock: vi.fn(async () => true), releaseChatLock: vi.fn(),
   addPendingSpace: vi.fn(async () => {}),
+  getLatestTaskTrace: vi.fn(async () => ({ runtime: "vercel", status: "ok", duration_ms: 5000, prompt: "cek repo",
+    events: JSON.stringify([{ t: 0, kind: "tool", name: "getPRDiff", ok: true, ms: 300 }]) })),
 }));
 vi.mock("../src/services/spaces-poll.js", () => ({ pollSpacesResult: vi.fn(async () => true) }));
 vi.mock("../src/utils/logger.js", () => ({ logError: vi.fn(async () => {}), getRecentErrors: vi.fn(async () => []) }));
@@ -34,6 +36,14 @@ beforeEach(() => {
 });
 
 describe("handleWebhook", () => {
+  it("/trace menampilkan jejak tugas terakhir", async () => {
+    const { sendTelegramMessage } = await import("../src/services/telegram.js");
+    await handleWebhook(post(update("/trace")), env, ctx);
+    await ctx.flush();
+    expect(sendTelegramMessage).toHaveBeenCalledWith(env.TELEGRAM_BOT_TOKEN, "111", expect.stringContaining("getPRDiff"));
+    expect(processMessage).not.toHaveBeenCalled();
+  });
+
   it("GET ditolak", async () => {
     const res = await handleWebhook(req("/"), env, ctx);
     expect(res.status).toBe(405);

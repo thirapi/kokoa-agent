@@ -5,6 +5,7 @@ import { runAgentLoop, buildProviderConfigs } from "../handlers/message.js";
 import { ApprovalPending } from "./approval.js";
 import { buildDetachedEnv } from "./detached-env.js";
 import { runnerAuthHeaders } from "../utils/auth.js";
+import { createTracer } from "./trace.js";
 
 export const REMOTE_EXECUTION_TIMEOUT_MS = 270000; // < maxDuration Vercel 300 detik
 
@@ -44,14 +45,16 @@ export async function executeRemoteJob(job, platformEnv, { runtime = "vercel" } 
     userPrompt = job.userPrompt || "";
   }
 
+  const tracer = createTracer();
   const data = { status: "ready", finalText: null, newContent: [], escalationTriggered: false,
-    filesModified: null, error: null, proxySent: false, historySynced: false, pendingMedia: [], progressMsgId };
+    filesModified: null, error: null, proxySent: false, historySynced: false, pendingMedia: [], progressMsgId,
+    runtime, prompt: userPrompt, trace: tracer.events };
   try {
     const providers = await buildProviderConfigs(env);
     if (providers.length === 0) throw new Error("gak ada provider AI yang aktif di runtime " + runtime);
     const result = await runAgentLoop(contents, env, chatId, userPrompt, providers, contents.slice(0, historyLen),
       Date.now(), {
-        executionTimeout: REMOTE_EXECUTION_TIMEOUT_MS, iterationTimeout: 30000, runtime,
+        executionTimeout: REMOTE_EXECUTION_TIMEOUT_MS, iterationTimeout: 30000, runtime, tracer,
         resume, saveSnapshot: cap.saveSnapshot, notifyApproval: cap.notifyApproval,
       });
     const full = result.contents || contents;
@@ -67,6 +70,7 @@ export async function executeRemoteJob(job, platformEnv, { runtime = "vercel" } 
       data.error = String(err?.message || err);
     }
   }
+  data.durationMs = Date.now() - tracer.startedAt;
   return data;
 }
 

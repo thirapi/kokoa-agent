@@ -473,3 +473,38 @@ export async function cleanupExpiredPending(env, maxAgeSeconds = 3600) {
     console.error("cleanupExpiredPending error:", e);
   }
 }
+
+// ---- Trace tugas (lihat src/agent/trace.js) ----
+export async function saveTaskTrace(env, { id, chatId, runtime, prompt, status, durationMs, events }) {
+  try {
+    if (!env?.DB?.prepare || !Array.isArray(events)) return;
+    await env.DB.prepare(
+      "INSERT OR REPLACE INTO task_traces (id, chat_id, runtime, prompt, status, duration_ms, events) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).bind(
+      id || (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
+      String(chatId), runtime || "worker", String(prompt || "").slice(0, 300), status || "ok",
+      Math.round(durationMs || 0), JSON.stringify(events).slice(0, 60000)
+    ).run();
+  } catch (e) {
+    console.error("saveTaskTrace error:", e.message);
+  }
+}
+
+export async function getLatestTaskTrace(env, chatId) {
+  try {
+    return await env.DB.prepare(
+      "SELECT * FROM task_traces WHERE chat_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1"
+    ).bind(String(chatId)).first();
+  } catch (e) {
+    console.error("getLatestTaskTrace error:", e.message);
+    return null;
+  }
+}
+
+export async function pruneTaskTraces(env, maxAgeSeconds = 7 * 24 * 3600) {
+  try {
+    await env.DB.prepare("DELETE FROM task_traces WHERE created_at < unixepoch() - ?").bind(maxAgeSeconds).run();
+  } catch (e) {
+    console.error("pruneTaskTraces error:", e.message);
+  }
+}

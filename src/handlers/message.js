@@ -13,6 +13,7 @@ import { validateToolArgs, isReadOnlyTool } from "../agent/registry.js";
 import { detectScope, extractLatestUserText, recentUserTexts, isRepoTool } from "../agent/scope.js";
 import { resolveAgentMode } from "../agent/mode.js";
 import { chooseRuntime, shouldRetryRemote } from "../agent/route.js";
+import { createTracer, summarizeArgs, traceStatus } from "../agent/trace.js";
 import {
   needsApproval, toolCallKey, ApprovalPending, prDiffReviewedBefore,
   saveApproval, stripMediaForSnapshot, approvalButtons, approvalPromptText,
@@ -32,6 +33,7 @@ import {
   getAllMemories,
   acquireChatLock,
   releaseChatLock,
+  saveTaskTrace,
 } from "../db/index.js";
 import { callGitHubAPI } from "../services/github.js";
 import { webSearch, webFetch } from "../services/search.js";
@@ -160,13 +162,17 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
   // Resume: eksekusi/tolak pending tool call DULU sebelum loop lanjut,
   // karena model tidak akan mengulang functionCall yang sudah ada di contents.
   let grantedToolFailure = null;
+  const tracer = options.tracer || createTracer();
+  if (resume?.pendingTool) tracer.add("resume", resume.pendingTool.tool, { note: resume.grantedKey ? "disetujui" : "dibatalkan" });
   if (resume?.pendingTool && !resume.settledPending) {
     resume.settledPending = true;
     const { tool: pTool, args: pArgs, key: pKey } = resume.pendingTool;
     let pResult;
     if (resume.grantedKey && resume.grantedKey === pKey) {
       console.log(`[Approval] Executing granted tool ${pTool} on resume`);
+      const tGranted = Date.now();
       const res = await runHarnessToolCall(pTool, pArgs || {}, env, chatId, toolCache, { toolExecutor: execTool });
+      tracer.add("tool", pTool, { ok: res.ok, ms: Date.now() - tGranted, args: summarizeArgs(pArgs), error: res.ok ? undefined : String(res.error).slice(0, 160) });
       pResult = res.ok ? res.result : { error: res.error };
       if (!res.ok) {
         const perm = /\b(403|404)\b|Resource not accessible|Must have admin rights/i.test(res.error)
@@ -250,6 +256,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
     );
     err.code = 'EXECUTION_TIMEOUT';
     err.stateMutated = stateMutated;
+    err.trace = tracer.events;
     if (cause) err.cause = cause;
     return err;
   };
@@ -314,6 +321,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
           if (Date.now() - startTime > maxTime) break outerLoop;
 
           const keyShort = key.slice(-6);
+          const tCall = Date.now();
           try {
             const cleanContents = currentContents.map(c => {
               const { _selfReflection, ...rest } = c;
@@ -327,10 +335,16 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
             response = await Promise.race([fetchPromise, timeoutPromise]);
             if (response) {
               providerUsed = name;
+              const calls = (response.candidates?.[0]?.content?.parts || []).filter((p) => p.functionCall).map((p) => p.functionCall.name);
+              tracer.add("llm", `${name}/${model}`, { ok: true, ms: Date.now() - tCall, note: calls.length ? `→ ${calls.join(", ")}` : "→ teks" });
               break outerLoop;
             }
-          } catch (err) {
+          } catch (rawErr) {
+            // Nilai yang dilempar tidak selalu Error (mis. reject() tanpa argumen) —
+            // normalisasi agar err.message selalu string (penyebab TypeError ".includes").
+            const err = rawErr instanceof Error ? rawErr : new Error(String(rawErr ?? "unknown error"));
             console.error(`[${name}] Error model ${model} [Key: ${keyShort}...]:`, err.message);
+            tracer.add("llm", `${name}/${model}`, { ok: false, ms: Date.now() - tCall, error: String(err.message).slice(0, 160) });
             lastError = err;
             globalFailures++;
 
@@ -338,7 +352,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
               break outerLoop;
             }
 
-            const errMsg = err.message;
+            const errMsg = String(err.message || "");
 
             // Jaringan transient (NAT HF me-RST TLS) = BUKAN salah key/model.
             // Jangan blacklist/cooldown (itu menghukum key sehat 60 detik);
@@ -463,22 +477,26 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
           const validation = validateToolArgs(name, args || {});
           if (!validation.valid) {
             console.warn(`[Registry Validation Failed]: ${validation.error}`);
+            tracer.add("blocked", name, { ok: false, note: "validasi", args: summarizeArgs(args) });
             return { error: validation.error };
           }
           // Mode plan: blokir tool tulis/eksekusi di level harness (bukan cuma prompt)
           if (agentMode === 'plan' && !isReadOnlyTool(name)) {
             console.warn(`[Plan Mode Blocked]: ${name}`);
+            tracer.add("blocked", name, { ok: false, note: "mode plan", args: summarizeArgs(args) });
             return { error: `mode plan aktif, tool "${name}" diblokir karena read-only. ketik /build buat eksekusi.` };
           }
           // Scope enforcement: pesan umum tidak boleh menyentuh tool repo/file lokal.
           // Banner prompt saja terbukti diabaikan model — jadi diblokir keras di sini.
           if (loopScope === 'general' && isRepoTool(name)) {
             console.warn(`[Scope Blocked]: ${name} (pesan terakhir umum, bukan tugas repo)`);
+            tracer.add("blocked", name, { ok: false, note: "scope umum", args: summarizeArgs(args) });
             return { error: `pesan terakhir user adalah permintaan umum, bukan tugas kode/repo — tool "${name}" diblokir. kerjakan HANYA permintaan terakhir user; jangan lanjutkan tugas lama dari riwayat chat. kalau user memang mau tugas repo/kode, minta mereka menyatakannya eksplisit.` };
           }
           // Jangan minta izin merge sebelum review: diff harus sudah dibaca di langkah sebelumnya.
           if (name === 'mergePullRequest' && !prDiffReviewedBefore(currentContents.slice(0, -1), args || {})) {
             console.warn(`[Merge Guard] merge PR ${args?.pull_number} ditolak: belum ada review`);
+            tracer.add("blocked", name, { ok: false, note: "belum review", args: summarizeArgs(args) });
             return { error: "merge ditahan: baca diff PR ini dulu dengan getPRDiff (langkah terpisah, JANGAN paralel dengan merge), tulis review-nya ke user, lalu panggil mergePullRequest HANYA kalau review menyimpulkan aman/approve. kalau ada bug/masalah, JANGAN merge — laporkan temuannya." };
           }
           // Approval gate: tool berisiko tinggi wajib dikonfirmasi user dulu (mode build)
@@ -521,6 +539,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
                 });
                 const reason = parts.map((p) => p.text).filter(Boolean).join("\n");
                 await notify({ id: approvalId, tool: name, toolArgs: args || {}, reason });
+                tracer.add("approval", name, { note: "menunggu ✅/❌", args: summarizeArgs(args) });
                 throw new ApprovalPending(approvalId);
               }
             }
@@ -531,7 +550,9 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
             filesModified = true;
           }
           await sendProgress(`Menjalankan ${name}...`);
+          const tTool = Date.now();
           const res = await runHarnessToolCall(name, args, env, chatId, toolCache, { toolExecutor: execTool });
+          tracer.add("tool", name, { ok: res.ok, ms: Date.now() - tTool, args: summarizeArgs(args), error: res.ok ? undefined : String(res.error).slice(0, 160) });
           if (!res.ok) {
             console.error(`Tool "${name}" gagal:`, res.error);
             await sendProgress(`Gagal menjalankan ${name}: ${res.error}`);
@@ -620,7 +641,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
   if (grantedToolFailure) {
     finalText = finalText ? `${grantedToolFailure}\n\n${finalText}` : grantedToolFailure;
   }
-  return { finalText, escalationTriggered, contents: currentContents, filesModified, iterations: iteration };
+  return { finalText, escalationTriggered, contents: currentContents, filesModified, iterations: iteration, trace: tracer.events };
 }
 
 const HEAVY_FILE_TOOLS = new Set([
@@ -909,12 +930,19 @@ export async function processMessage(message, env, options = {}) {
     const startTime = Date.now();
 
     let result;
+    const tracer = createTracer();
+    const saveTrace = (status) => saveTaskTrace(env, {
+      chatId, runtime: "worker", prompt: userPrompt, status,
+      durationMs: Date.now() - startTime, events: tracer.events,
+    });
     try {
       result = await runAgentLoop(
         currentContents, env, chatId, userPrompt,
-        providerConfigs, history, startTime
+        providerConfigs, history, startTime, { tracer }
       );
+      await saveTrace(traceStatus(result));
     } catch (err) {
+      await saveTrace(err instanceof ApprovalPending ? "approval" : "error");
       // Worker kehabisan waktu & belum ada efek samping -> ulangi di Spaces (budget 240 detik).
       // forceRuntime = ini SUDAH fallback dari runtime jarak jauh; jangan pantulkan balik.
       if (runtime === 'worker' && !options.forceRuntime && shouldRetryRemote(err, hasRemote)) {

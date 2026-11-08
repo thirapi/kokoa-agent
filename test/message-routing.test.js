@@ -22,7 +22,7 @@ vi.mock("../src/db/index.js", async () => {
   return {
     getHistory: vi.fn(async () => []), addHistory: fn(), trimHistory: fn(), clearHistory: fn(),
     saveGHAContext: fn(), getTasks: vi.fn(async () => []), getAllMemories: vi.fn(async () => []),
-    acquireChatLock: vi.fn(async () => true), releaseChatLock: fn(),
+    acquireChatLock: vi.fn(async () => true), releaseChatLock: fn(), saveTaskTrace: fn(),
     setMemory: fn(), getMemory: fn(), deleteMemory: fn(), getRecentMemories: vi.fn(async () => []),
     addTask: fn(), updateTaskStatus: fn(), createTasks: fn(), clearTasks: fn(),
     addReminder: fn(), getReminders: vi.fn(async () => []), deleteReminder: fn(),
@@ -59,6 +59,9 @@ describe("processMessage routing", () => {
     expect(sentTexts().some((t) => t.includes("halo jugaa"))).toBe(true);
     expect(db.addHistory).toHaveBeenCalled();
     expect(db.releaseChatLock).toHaveBeenCalledWith(env, "5");
+    const saved = db.saveTaskTrace.mock.calls[0][1];
+    expect(saved).toMatchObject({ chatId: "5", runtime: "worker", status: "ok" });
+    expect(saved.events[0]).toMatchObject({ kind: "llm", ok: true });
   });
 
   it("tugas repo dikirim ke Spaces dan lock tidak dilepas Worker", async () => {

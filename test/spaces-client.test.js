@@ -6,7 +6,7 @@ vi.mock("../src/db/index.js", () => ({
   addHistory: vi.fn(), trimHistory: vi.fn(), addPendingSpace: vi.fn(), removePendingSpace: vi.fn(),
   releaseChatLock: vi.fn(), acquireChatLock: vi.fn(async () => true),
   getDueReminders: vi.fn(async () => []), markReminderTriggered: vi.fn(),
-  getPendingSpaces: vi.fn(async () => []), cleanupExpiredPending: vi.fn(),
+  getPendingSpaces: vi.fn(async () => []), cleanupExpiredPending: vi.fn(), saveTaskTrace: vi.fn(), pruneTaskTraces: vi.fn(),
 }));
 vi.mock("../src/services/telegram.js", () => ({
   sendTelegramMessage: vi.fn(async () => [{ message_id: 1 }]), deleteTelegramMessage: vi.fn(async () => {}),
@@ -93,6 +93,13 @@ describe("pollSpacesResult", () => {
 });
 
 describe("handleSpacesResult", () => {
+  it("menyimpan trace dari runtime jarak jauh ke D1", async () => {
+    fetchMock.mockResolvedValue(json({}));
+    const trace = [{ t: 0, kind: "llm", name: "gemini/m", ok: true }];
+    await handleSpacesResult(env, "9", { finalText: "x", trace, runtime: "vercel", prompt: "p", durationMs: 1234 }, null, { source: "vercel" });
+    expect(db.saveTaskTrace).toHaveBeenCalledWith(env, { chatId: "9", runtime: "vercel", prompt: "p", status: "ok", durationMs: 1234, events: trace });
+  });
+
   it("kasus nyata: Spaces menunggu izin -> Worker simpan snapshot & kirim tombol, TANPA pesan 'loop selesai'", async () => {
     fetchMock.mockResolvedValue(json({}));
     const approval = { id: "ap1", tool: "mergePullRequest", toolArgs: { pull_number: 3 }, snapshot: { runtime: "spaces", chatId: "9", pending: { tool: "mergePullRequest", key: "k" } } };

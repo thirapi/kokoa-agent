@@ -137,7 +137,14 @@ export async function handleCron(event, env, ctx) {
   // 2. Poll Spaces for pending results (fallback for short-poll failures)
   await pollSpacesResults(env, ctx);
 
-  // 3. Tiap 15 menit: terima undangan repo dari pemilik.
+  // 3. Sekali sehari (03:00 WIB): buang trace > 7 hari.
+  const at = new Date(event?.scheduledTime || Date.now());
+  if (at.getUTCHours() === 20 && at.getUTCMinutes() === 0) {
+    const { pruneTaskTraces } = await import("../db/index.js");
+    await pruneTaskTraces(env);
+  }
+
+  // 4. Tiap 15 menit: terima undangan repo dari pemilik.
   const minute = new Date(event?.scheduledTime || Date.now()).getUTCMinutes();
   if (minute % 15 === 0) {
     await acceptOwnerInvitations(env).catch((e) => console.error("[Cron] cek undangan gagal:", e.message));

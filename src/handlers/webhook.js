@@ -397,6 +397,17 @@ export async function handleWebhook(request, env, ctx) {
       return new Response("OK", { status: 200 });
     }
 
+    // /trace: jejak langkah demi langkah tugas terakhir (LLM, tool, approval, durasi).
+    if (normalizedText === "/trace") {
+      ctx.waitUntil((async () => {
+        await env.CHAT_HISTORY.put(lastUpdateKey, String(updateId), { expirationTtl: 300 });
+        const { getLatestTaskTrace } = await import("../db/index.js");
+        const { formatTrace } = await import("../agent/trace.js");
+        await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId, formatTrace(await getLatestTaskTrace(env, chatId)));
+      })());
+      return new Response("OK", { status: 200 });
+    }
+
     if (normalizedText === "/logs" || normalizedText === "/error" || normalizedText === "/debug") {
       ctx.waitUntil((async () => {
         try {

@@ -71,3 +71,15 @@ CREATE TABLE IF NOT EXISTS spaces_pending (
   chat_id TEXT PRIMARY KEY,
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+
+CREATE TABLE IF NOT EXISTS task_traces (
+  id TEXT PRIMARY KEY,
+  chat_id TEXT NOT NULL,
+  runtime TEXT,
+  prompt TEXT,
+  status TEXT,
+  duration_ms INTEGER,
+  events TEXT,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_task_traces_chat ON task_traces(chat_id, created_at);

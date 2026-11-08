@@ -28,6 +28,14 @@ export async function sendApprovalPrompt(env, chatId, approval) {
 // karena jaringan/provider. Dalam kasus itu: jangan kirim pesan error, jangan lepas lock,
 // jangan proses antrean — pemanggil yang melanjutkan. Return { retryable }.
 export async function handleSpacesResult(env, chatId, data, progressMsgId, opts = {}) {
+  if (Array.isArray(data?.trace)) {
+    const { saveTaskTrace } = await import("../db/index.js");
+    const { traceStatus } = await import("../agent/trace.js");
+    await saveTaskTrace(env, {
+      chatId, runtime: data.runtime || opts.source || "spaces", prompt: data.prompt,
+      status: traceStatus(data), durationMs: data.durationMs, events: data.trace,
+    });
+  }
   const retryable = !!opts.fallbackOnRetryable && !data.finalText && !data.proxySent
     && !data.escalationTriggered && !!data.error && isRetryableSpacesError(data.error);
   const { addHistory, trimHistory, removePendingSpace, releaseChatLock } = await import("../db/index.js");

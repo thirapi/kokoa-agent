@@ -5,7 +5,7 @@ vi.mock("../src/db/index.js", async () => {
   return {
     getHistory: vi.fn(async () => []), addHistory: fn(), trimHistory: fn(), clearHistory: fn(), saveGHAContext: fn(),
     getTasks: vi.fn(async () => []), getAllMemories: vi.fn(async () => []), getRecentMemories: vi.fn(async () => []),
-    acquireChatLock: vi.fn(async () => true), releaseChatLock: fn(), setMemory: fn(), getMemory: fn(),
+    acquireChatLock: vi.fn(async () => true), releaseChatLock: fn(), saveTaskTrace: fn(), setMemory: fn(), getMemory: fn(),
   };
 });
 
