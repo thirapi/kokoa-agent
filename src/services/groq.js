@@ -1,3 +1,4 @@
+import { INJECTION_GUARD_PROMPT } from "../agent/injection.js";
 import { githubTools, spacesTools, trelloTools } from "../tools/definitions.js";
 import { compactWithEvicted, evictedToText, buildSummaryMessage, buildEvictedNoteMessage } from "../agent/compaction.js";
 import { withNetworkRetry } from "../utils/net.js";
@@ -334,6 +335,7 @@ export async function buildSystemMessage(env, chatId, scope = 'continue', skills
     memoryHint,
     reminderHint,
     isGeneralScope ? null : approvalHint,
+    INJECTION_GUARD_PROMPT,
     personaBlock,
     unrestrictedInstruction,
     timeContext,

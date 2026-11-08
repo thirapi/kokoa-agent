@@ -91,7 +91,8 @@ export function findPRDiff(contents, args = {}) {
     for (const p of c.parts || []) {
       if (p.functionCall?.name === "getPRDiff") pending = String(p.functionCall.args?.pull_number ?? "") === want;
       if (pending && p.functionResponse?.name === "getPRDiff") {
-        const r = p.functionResponse.response?.content;
+        let r = p.functionResponse.response?.content;
+        if (r && typeof r === "object" && "untrusted_content" in r) r = r.untrusted_content;
         return typeof r === "string" ? r : JSON.stringify(r ?? "");
       }
     }

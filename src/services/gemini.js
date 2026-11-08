@@ -1,3 +1,4 @@
+import { INJECTION_GUARD_PROMPT } from "../agent/injection.js";
 import { githubTools, spacesTools, trelloTools } from "../tools/definitions.js";
 import { getRecentMemories } from "../db/index.js";
 import { detectScope, buildScopeBanner, scopedRepoLabel, isRepoTool, recentUserTexts } from "../agent/scope.js";
@@ -211,6 +212,7 @@ export async function fetchGeminiGenerate(model, key, contents, env, chatId) {
     reminderHint,
     isGeneralScope ? null : approvalHint,
     isGeneralScope ? null : escalationHint,
+    INJECTION_GUARD_PROMPT,
     personaReinforcement,
     unrestrictedInstruction,
     timeContext,

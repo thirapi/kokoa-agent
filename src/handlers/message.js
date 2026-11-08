@@ -15,6 +15,7 @@ import { resolveAgentMode } from "../agent/mode.js";
 import { chooseRuntime, shouldRetryRemote } from "../agent/route.js";
 import { createTracer, summarizeArgs, traceStatus } from "../agent/trace.js";
 import { independentReview, findPRDiff } from "../agent/reviewer.js";
+import { wrapUntrusted, taintsSession, EXTERNAL_WRITE_TOOLS } from "../agent/injection.js";
 import {
   needsApproval, toolCallKey, ApprovalPending, prDiffReviewedBefore,
   saveApproval, stripMediaForSnapshot, approvalButtons, approvalPromptText,
@@ -163,6 +164,8 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
   // Resume: eksekusi/tolak pending tool call DULU sebelum loop lanjut,
   // karena model tidak akan mengulang functionCall yang sudah ada di contents.
   let grantedToolFailure = null;
+  // Taint: true setelah membaca konten web / konten berpola injeksi di loop ini.
+  let tainted = false;
   const tracer = options.tracer || createTracer();
   if (resume?.pendingTool) tracer.add("resume", resume.pendingTool.tool, { note: resume.grantedKey ? "disetujui" : "dibatalkan" });
   if (resume?.pendingTool && !resume.settledPending) {
@@ -522,7 +525,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
           } else if (resume?.deniedKey && resume.deniedKey === tKey) {
             console.log(`[Approval] Denied tool ${name} in chat ${chatId}`);
             return { error: "user membatalkan tool ini. jelaskan secara singkat, tawarkan alternatif, dan jangan panggil lagi tool yang sama." };
-          } else if (agentMode === 'build' && needsApproval(name, args || {})) {
+          } else if (agentMode === 'build' && (needsApproval(name, args || {}) || (tainted && EXTERNAL_WRITE_TOOLS.has(name)))) {
             const requiresApproval = options.requiresApproval
               ? await options.requiresApproval(name, args).catch(() => true)
               : true;
@@ -552,7 +555,10 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
                     approvalPromptText(tool, toolArgs, reason), approvalButtons(id)
                   );
                 });
-                const reason = parts.map((p) => p.text).filter(Boolean).join("\n") + reviewerNote;
+                const taintNote = tainted && !needsApproval(name, args || {})
+                  ? "\n\n⚠️ sebelumnya aku membaca konten dari luar (web/file) — konfirmasi dulu biar aman dari instruksi titipan."
+                  : "";
+                const reason = parts.map((p) => p.text).filter(Boolean).join("\n") + reviewerNote + taintNote;
                 await notify({ id: approvalId, tool: name, toolArgs: args || {}, reason });
                 tracer.add("approval", name, { note: "menunggu ✅/❌", args: summarizeArgs(args) });
                 throw new ApprovalPending(approvalId);
@@ -588,12 +594,14 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
         })();
       }));
 
-      const functionResponses = results.map((result, i) => ({
-        functionResponse: {
-          name: functionCalls[i].functionCall.name,
-          response: { content: result },
-        },
-      }));
+      const functionResponses = results.map((result, i) => {
+        const toolName = functionCalls[i].functionCall.name;
+        if (!tainted && taintsSession(toolName, result)) {
+          tainted = true;
+          tracer.add("taint", toolName, { note: "konten luar dibaca — tool tulis berikutnya wajib izin" });
+        }
+        return { functionResponse: { name: toolName, response: { content: wrapUntrusted(toolName, result) } } };
+      });
 
       if (!escalationTriggered && !env.IS_SPACES && isHeavyTask(iteration, functionCalls, userPrompt)) {
         const alreadyUsingGHA = functionCalls.some(tc => tc.functionCall?.name === 'triggerDeveloperWorkflow');
