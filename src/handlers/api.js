@@ -32,6 +32,16 @@ export async function handleAPI(request, env, ctx) {
 
   // Hasil agent dari Vercel (POST oleh api/agent.js). Diantar persis seperti hasil Spaces:
   // simpan riwayat, kirim jawaban/approval, lepas lock, proses antrean.
+  // Smoke test production (tanpa efek ke user). ?deep=1 menambah 1 panggilan LLM.
+  if (path === "/api/selftest") {
+    const { runSelftest } = await import("../agent/selftest.js");
+    const report = await runSelftest(env, { deep: url.searchParams.get("deep") === "1" });
+    return new Response(JSON.stringify(report, null, 2), {
+      status: report.ok ? 200 : 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
   if (path === "/api/agent-result") {
     if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
     let body;

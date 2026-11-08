@@ -1,0 +1,38 @@
+name: Production Smoke Test
+
+# Memeriksa semua komponen production lewat /api/selftest (tanpa pesan ke user).
+# Otomatis setelah deploy berhasil; bisa juga dijalankan manual (deep = + 1 panggilan LLM).
+on:
+  workflow_run:
+    workflows: ["Deploy Multi-Target"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      deep:
+        description: "ikut uji 1 panggilan LLM sungguhan"
+        type: boolean
+        default: true
+
+jobs:
+  smoke:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call /api/selftest
+        env:
+          RUNNER_SECRET: ${{ secrets.RUNNER_SECRET }}
+          WORKER_URL: ${{ vars.WORKER_URL || 'https://tg-bot.thirapi.workers.dev' }}
+          DEEP: ${{ github.event_name == 'workflow_dispatch' && inputs.deep && '1' || '0' }}
+        run: |
+          sleep 15 # beri waktu deploy menyebar
+          code=$(curl -s -o report.json -w '%{http_code}' -m 90 "$WORKER_URL/api/selftest?deep=$DEEP" -H "Authorization: Bearer $RUNNER_SECRET")
+          {
+            echo "## Smoke test production (HTTP $code)"
+            echo
+            echo "| | cek | durasi | detail |"
+            echo "|---|---|---|---|"
+            jq -r '.results[] | "| \(if .ok then "✅" else "❌" end) | \(.name) | \(.ms)ms | \(.detail // .error) |"' report.json
+          } >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.results[] | "\(if .ok then "PASS" else "FAIL" end) \(.name) (\(.ms)ms) — \(.detail // .error)"' report.json
+          [ "$code" = "200" ]
