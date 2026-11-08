@@ -430,7 +430,7 @@ export const githubTools = [
       },
       {
         name: "songSearch",
-        description: "Mencari lagu (judul, penyanyi, album, preview audio 30 detik, cover, link lagu full). Panggil sendAudio dengan previewUrl untuk mengirim cuplikan ke chat, dan sertakan songUrl agar user bisa dengar full di Apple Music/Spotify.",
+        description: "Info lagu + CUPLIKAN 30 detik (judul, penyanyi, album, previewUrl, cover). JANGAN dipakai kalau user cuma minta dikirimi lagu — untuk itu pakai youtubeMp3 (lagu full). Pakai ini hanya bila user minta cuplikan/preview/info lagu, atau youtubeMp3 gagal.",
         parameters: {
           type: "OBJECT",
           properties: {
@@ -472,7 +472,7 @@ export const githubTools = [
       },
       {
         name: "youtubeMp3",
-        description: "Mencari lagu di YouTube lalu menyiapkan FILE MP3 full-nya (konverter pribadi, untuk dipakai sendiri). Input bisa judul+penyanyi atau link YouTube. Hasil ada mp3Url: LANGSUNG kirim via sendAudio (audioUrl=mp3Url, title=title, performer=channel) — jangan tempel mp3Url di teks. Kalau hasil berisi error, bagikan watchUrl saja dan JANGAN ulangi youtubeMp3 berkali-kali dalam satu sesi.",
+        description: "PILIHAN UTAMA saat user minta/kirim/putar lagu: mencari lagu di YouTube lalu menyiapkan FILE MP3 full-nya (konverter pribadi, untuk dipakai sendiri). Input bisa judul+penyanyi atau link YouTube. Hasil ada mp3Url: LANGSUNG kirim via sendAudio (audioUrl=mp3Url, title=title, performer=channel) — jangan tempel mp3Url di teks. Kalau hasil berisi error, bagikan watchUrl saja dan JANGAN ulangi youtubeMp3 berkali-kali dalam satu sesi.",
         parameters: {
           type: "OBJECT",
           properties: {
