@@ -140,24 +140,54 @@ export async function imageSearch(query) {
   throw new Error("Semua image backend gagal: " + errors.join("; "));
 }
 
-export async function songSearch(query) {
+// Cuplikan lagu (30 detik). iTunes membalas 429 ke IP Cloudflare Worker (IP bersama),
+// jadi Deezer (gratis, tanpa key, cuplikan mp3) dipakai sebagai cadangan.
+async function songSearchITunes(query) {
   const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=music&entity=song&limit=5&lang=id_id`;
-  const res = await fetch(url, {
-    headers: { "User-Agent": "TelegramBot/1.0 (Cocoa)" },
-    signal: AbortSignal.timeout(10000),
-  });
-  if (!res.ok) throw new Error(`iTunes returned HTTP ${res.status}`);
+  const res = await fetch(url, { headers: { "User-Agent": BOT_USER_AGENT }, signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error(`iTunes HTTP ${res.status}`);
   const data = await res.json();
-  const results = (data.results || []).map(t => ({
+  return (data.results || []).filter((t) => t.previewUrl).map((t) => ({
     track: t.trackName || "",
     artist: t.artistName || "",
     album: t.collectionName || "",
-    previewUrl: t.previewUrl || "",
+    previewUrl: t.previewUrl,
     artworkUrl: (t.artworkUrl100 || "").replace("100x100", "600x600"),
     songUrl: t.trackViewUrl || "",
+    source: "itunes",
   }));
-  if (results.length === 0) return { message: "Tidak ada lagu yang ketemu. Coba kata kunci lain ya!" };
-  return results;
+}
+
+async function songSearchDeezer(query) {
+  const res = await fetch(`https://api.deezer.com/search?q=${encodeURIComponent(query)}&limit=5`, {
+    headers: { "User-Agent": BOT_USER_AGENT }, signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`Deezer HTTP ${res.status}`);
+  const data = await res.json();
+  if (data.error) throw new Error(`Deezer: ${data.error.message || "error"}`);
+  return (data.data || []).filter((t) => t.preview).map((t) => ({
+    track: t.title || "",
+    artist: t.artist?.name || "",
+    album: t.album?.title || "",
+    previewUrl: t.preview,
+    artworkUrl: t.album?.cover_xl || t.album?.cover_big || "",
+    songUrl: t.link || "",
+    source: "deezer",
+  }));
+}
+
+export async function songSearch(query) {
+  const errors = [];
+  for (const [name, fn] of [["itunes", songSearchITunes], ["deezer", songSearchDeezer]]) {
+    try {
+      const results = await fn(query);
+      if (results.length) return results;
+    } catch (e) {
+      errors.push(`${name}: ${e.message}`);
+    }
+  }
+  if (errors.length === 2) throw new Error("Semua sumber lagu gagal: " + errors.join("; "));
+  return { message: "Tidak ada lagu yang ketemu. Coba kata kunci lain ya!" };
 }
 
 // Groq built-in browser search (server-side, Exa-powered, no scraping).

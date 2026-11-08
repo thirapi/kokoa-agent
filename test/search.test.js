@@ -58,3 +58,22 @@ describe("YouTube search (Innertube)", () => {
     expect((await youtubeSearch("x"))[0].watchUrl).toBe("https://www.youtube.com/watch?v=abc");
   });
 });
+
+import { songSearch } from "../src/services/search.js";
+
+describe("cuplikan lagu", () => {
+  it("iTunes 429 (IP Cloudflare) -> cadangan Deezer dengan format sama", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (u) => String(u).includes("itunes")
+      ? new Response("", { status: 429 })
+      : new Response(JSON.stringify({ data: [{ title: "アイドル", artist: { name: "YOASOBI" }, album: { title: "アイドル", cover_xl: "https://c/x.jpg" }, preview: "https://cdnt-preview.dzcdn.net/a.mp3", link: "https://www.deezer.com/track/1" }] }))));
+    expect(await songSearch("idol")).toEqual([{ track: "アイドル", artist: "YOASOBI", album: "アイドル", previewUrl: "https://cdnt-preview.dzcdn.net/a.mp3",
+      artworkUrl: "https://c/x.jpg", songUrl: "https://www.deezer.com/track/1", source: "deezer" }]);
+  });
+
+  it("dua-duanya gagal -> error jelas; tidak ketemu -> pesan ramah", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+    await expect(songSearch("x")).rejects.toThrow(/Semua sumber lagu gagal: itunes: iTunes HTTP 503; deezer: Deezer HTTP 503/);
+    vi.stubGlobal("fetch", vi.fn(async (u) => new Response(JSON.stringify(String(u).includes("itunes") ? { results: [] } : { data: [] }))));
+    expect((await songSearch("zzz")).message).toMatch(/Tidak ada lagu/);
+  });
+});
