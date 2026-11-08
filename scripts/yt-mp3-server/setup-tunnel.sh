@@ -36,7 +36,26 @@ ingress:
 EOF
 
 # CNAME <hostname> -> <id>.cfargotunnel.com. --overwrite-dns kalau record sudah ada.
-cloudflared tunnel route dns --overwrite-dns "$NAME" "$HOST"
+# --config wajib: tanpa itu cloudflared membaca ~/.cloudflared/config.yml dan memakai
+# tunnel di sana (bukan $NAME).
+# Login cloudflared (cert.pem) terikat ke SATU zona. Kalau $HOST ada di zona lain,
+# cloudflared diam-diam membuat "<host>.<zona-login>" — itu dideteksi di sini.
+OUT=$(cloudflared tunnel --config "$CFG" route dns --overwrite-dns "$NAME" "$HOST" 2>&1) || { echo "$OUT" >&2; exit 1; }
+echo "$OUT" | grep -v WRN
+if ! echo "$OUT" | grep -qE "CNAME $HOST( |$)|already configured to route to your tunnel"; then
+  cat >&2 <<MSG
+
+DNS untuk $HOST TIDAK dibuat di zona yang benar (lihat baris CNAME di atas; hapus record
+salah itu di dashboard). Login cloudflared-mu terikat ke zona lain. Pilih salah satu:
+  a) Domain di akun Cloudflare yang SAMA: dashboard > zona domainmu > DNS > Add record:
+     CNAME  $(echo "$HOST" | cut -d. -f1)  ->  $ID.cfargotunnel.com  (Proxied)
+  b) Domain di akun LAIN: buat tunnel dari dashboard Zero Trust akun itu
+     (Networks > Tunnels > Create, public hostname $HOST -> http://localhost:8787), lalu
+     docker run -d --name cloudflared-yt-mp3 --restart unless-stopped --network host \
+       cloudflare/cloudflared:latest tunnel --no-autoupdate run --token <TOKEN>
+MSG
+  exit 1
+fi
 
 docker rm -f "cloudflared-$NAME" >/dev/null 2>&1 || true
 docker run -d --name "cloudflared-$NAME" --restart unless-stopped --network host \
