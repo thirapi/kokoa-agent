@@ -14,6 +14,7 @@ import { detectScope, extractLatestUserText, recentUserTexts, isRepoTool } from 
 import { resolveAgentMode } from "../agent/mode.js";
 import { chooseRuntime, shouldRetryRemote } from "../agent/route.js";
 import { createTracer, summarizeArgs, traceStatus } from "../agent/trace.js";
+import { independentReview, findPRDiff } from "../agent/reviewer.js";
 import {
   needsApproval, toolCallKey, ApprovalPending, prDiffReviewedBefore,
   saveApproval, stripMediaForSnapshot, approvalButtons, approvalPromptText,
@@ -499,6 +500,20 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
             tracer.add("blocked", name, { ok: false, note: "belum review", args: summarizeArgs(args) });
             return { error: "merge ditahan: baca diff PR ini dulu dengan getPRDiff (langkah terpisah, JANGAN paralel dengan merge), tulis review-nya ke user, lalu panggil mergePullRequest HANYA kalau review menyimpulkan aman/approve. kalau ada bug/masalah, JANGAN merge — laporkan temuannya." };
           }
+          // Reviewer independen (model terpisah, hanya melihat diff) sebelum minta izin merge.
+          let reviewerNote = "";
+          if (name === 'mergePullRequest' && !options.skipIndependentReview) {
+            const diff = findPRDiff(currentContents, args || {});
+            const review = diff ? await independentReview(env, { diff, title: `${args?.owner}/${args?.repo}#${args?.pull_number}` }).catch(() => null) : null;
+            tracer.add("review", `PR #${args?.pull_number}`, {
+              ok: review ? review.verdict === "approve" : undefined,
+              note: review ? `${review.model}: ${review.verdict}${review.reasons.length ? " — " + review.reasons.join("; ") : ""}` : "reviewer tidak tersedia",
+            });
+            if (review?.verdict === "request_changes") {
+              return { error: `merge DIBLOKIR reviewer independen (${review.model}): ${review.reasons.join("; ") || "ada masalah"}. sampaikan temuan ini ke user dan JANGAN merge sampai diperbaiki.` };
+            }
+            reviewerNote = review ? `\n\nreviewer independen (${review.model}): ✅ approve` : "\n\nreviewer independen tidak tersedia — periksa sendiri sebelum lanjut.";
+          }
           // Approval gate: tool berisiko tinggi wajib dikonfirmasi user dulu (mode build)
           const tKey = toolCallKey(name, args || {});
           if (resume?.grantedKey && resume.grantedKey === tKey && !resume.consumedGrant) {
@@ -537,7 +552,7 @@ export async function runAgentLoop(currentContents, env, chatId, userPrompt, pro
                     approvalPromptText(tool, toolArgs, reason), approvalButtons(id)
                   );
                 });
-                const reason = parts.map((p) => p.text).filter(Boolean).join("\n");
+                const reason = parts.map((p) => p.text).filter(Boolean).join("\n") + reviewerNote;
                 await notify({ id: approvalId, tool: name, toolArgs: args || {}, reason });
                 tracer.add("approval", name, { note: "menunggu ✅/❌", args: summarizeArgs(args) });
                 throw new ApprovalPending(approvalId);

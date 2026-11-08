@@ -29,6 +29,30 @@ import {
 
 import { withCoAuthor, coAuthorTrailer, ownerIdentity, withPrFooter } from "../utils/attribution.js";
 
+// Merge hanya bila PR bisa di-merge dan CI tidak gagal/masih berjalan.
+// Dilempar sebagai error -> user diberi tahu alasannya (lihat grantedToolFailure).
+export async function assertPullRequestMergeable(env, owner, repo, number) {
+  const pr = await callGitHubAPI(env, `repos/${owner}/${repo}/pulls/${number}`);
+  if (!pr || typeof pr !== "object") return;
+  if (pr.merged) throw new Error(`PR #${number} sudah di-merge sebelumnya`);
+  if (pr.state && pr.state !== "open") throw new Error(`PR #${number} sudah ${pr.state}`);
+  if (pr.draft) throw new Error(`PR #${number} masih draft (biasanya karena test gagal) — tandai ready for review dulu`);
+  if (pr.mergeable === false) throw new Error(`PR #${number} tidak bisa di-merge (konflik / ${pr.mergeable_state || "blocked"})`);
+  const sha = pr.head?.sha;
+  if (!sha) return;
+  const [runs, combined] = await Promise.all([
+    callGitHubAPI(env, `repos/${owner}/${repo}/commits/${sha}/check-runs?per_page=100`).catch(() => null),
+    callGitHubAPI(env, `repos/${owner}/${repo}/commits/${sha}/status`).catch(() => null),
+  ]);
+  const checkRuns = Array.isArray(runs?.check_runs) ? runs.check_runs : [];
+  const failed = checkRuns.filter((c) => c.status === "completed" && ["failure", "timed_out", "cancelled", "action_required"].includes(c.conclusion));
+  const pending = checkRuns.filter((c) => c.status !== "completed");
+  if (combined?.total_count > 0 && combined.state === "failure") failed.push({ name: "status checks" });
+  if (combined?.total_count > 0 && combined.state === "pending") pending.push({ name: "status checks" });
+  if (failed.length) throw new Error(`merge ditolak: CI gagal (${failed.map((c) => c.name).join(", ")})`);
+  if (pending.length) throw new Error(`merge ditunda: CI masih berjalan (${pending.map((c) => c.name).join(", ")}). coba lagi setelah selesai`);
+}
+
 // Repo tempat workflow kokoa-dev.yml berada (penerima repository_dispatch).
 export function dispatchRepo(env) {
   return env?.GHA_DISPATCH_REPO || "thirapi/kokoa-agent";
@@ -125,6 +149,7 @@ export async function executeTool(name, args, env, chatId) {
     }
     case "mergePullRequest": {
       const pull_number = parseInt(args.pull_number, 10);
+      await assertPullRequestMergeable(env, args.owner, args.repo, pull_number);
       const endpoint = `repos/${args.owner}/${args.repo}/pulls/${pull_number}/merge`;
       const body = { commit_message: coAuthorTrailer(env) };
       if (args.commit_title) body.commit_title = args.commit_title;

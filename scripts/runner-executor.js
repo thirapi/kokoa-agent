@@ -6,6 +6,7 @@ import { AgentSession } from './runner-gemini.js';
 import { webSearch, webFetch } from '../src/services/search.js';
 import { sanitizedChildEnv } from '../src/tools/spaces-executor.js';
 import { ownerIdentity, withCoAuthor, withPrFooter } from '../src/utils/attribution.js';
+import { runProjectTests, testReportMarkdown } from '../src/utils/project-tests.js';
 
 // Atribusi ala Claude Code: commit atas nama pemilik, Cocoa sebagai co-author.
 const OWNER = ownerIdentity(process.env);
@@ -387,7 +388,13 @@ async function main() {
       return;
     }
 
-    console.log("Agent selesai. Mengecek perubahan git...");
+    console.log("Agent selesai. Menjalankan test repo sebelum commit...");
+    // Test dijalankan dengan env tanpa secret (kode repo target = tidak tepercaya).
+    const testResult = runProjectTests({ env: sanitizedChildEnv() });
+    if (testResult.ran) {
+      await sendTelegramUpdate(testResult.ok ? `test repo lulus ✅ (\`${testResult.cmd}\`)` : `test repo GAGAL ❌ — PR aku buka sebagai draft biar kamu cek dulu`);
+    }
+    console.log("Mengecek perubahan git...");
     execSync('git add .');
     const status = execSync('git status --porcelain', { encoding: 'utf8' });
 
@@ -426,14 +433,18 @@ async function main() {
         execFileSync('git', ['commit', '-m', commitMsg]);
         execSync(`git push ${authUrl} ${branchName}`, { stdio: 'pipe' });
 
-        const finalPrBody = withPrFooter(prBody || `**Kokoa Dev Agent Report**\n\n**Original Instruction:**\n${safeInstruction}`);
-        const prUrl = execFileSync('gh', [
+        const baseBody = prBody || `**Kokoa Dev Agent Report**\n\n**Original Instruction:**\n${safeInstruction}`;
+        const finalPrBody = withPrFooter(`${baseBody}\n\n${testReportMarkdown(testResult)}`);
+        const prArgs = [
           'pr', 'create',
           '--title', prTitle || branchName.replace(/^kokoa\//, ''),
           '--body', finalPrBody,
           '--head', branchName,
-          '--base', 'main'
-        ], { encoding: 'utf8' }).trim();
+          '--base', 'main',
+        ];
+        // Test gagal -> draft PR, supaya tidak ter-merge tanpa sengaja.
+        if (testResult.ran && !testResult.ok) prArgs.push('--draft');
+        const prUrl = execFileSync('gh', prArgs, { encoding: 'utf8' }).trim();
 
         await sendTelegramUpdate(`branch \`${branchName}\` + PR baru udah dibuat!`);
         await workerCallback("workflow_result", {

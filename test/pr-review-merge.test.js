@@ -66,7 +66,8 @@ describe("merge harus setelah review", () => {
     const firstResponses = fetchGeminiGenerate.mock.calls[1][2].at(-1).parts.map((p) => p.functionResponse);
     expect(firstResponses.find((r) => r.name === "mergePullRequest").response.content.error).toMatch(/merge ditahan/);
     expect(callGitHubAPI).not.toHaveBeenCalledWith(expect.anything(), expect.stringContaining("/merge"), "PUT", expect.anything());
-    expect(data.approval).toMatchObject({ tool: "mergePullRequest", reason: "review: aman, test lulus. approve." });
+    expect(data.approval.tool).toBe("mergePullRequest");
+    expect(data.approval.reason).toMatch(/^review: aman, test lulus\. approve\.\n\nreviewer independen tidak tersedia/);
     expect(approvalPromptText(data.approval.tool, data.approval.toolArgs, data.approval.reason)).toContain("alasan:\nreview: aman");
   });
 
@@ -104,5 +105,87 @@ describe("tool yang disetujui tapi gagal", () => {
       resume: { decision: "approve", snapshot: paused.approval.snapshot } }, platform);
     expect(done.finalText).toMatch(/^⚠️ mergePullRequest yang kamu setujui GAGAL dijalankan: .*403.*izin write/);
     expect(done.finalText).toContain("review selesai");
+  });
+});
+
+import { independentReview, parseVerdict, findPRDiff } from "../src/agent/reviewer.js";
+import { assertPullRequestMergeable } from "../src/tools/executor.js";
+
+const geminiJSON = (obj) => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify(obj) }] } }] }));
+
+describe("reviewer independen", () => {
+  it("request_changes dari reviewer MEMBLOKIR merge sebelum tombol izin muncul", async () => {
+    fetch.mockImplementation(async (u) => String(u).includes("generativelanguage")
+      ? geminiJSON({ verdict: "request_changes", reasons: ["data race di tasksHandler"] }) : new Response("{}"));
+    fetchGeminiGenerate
+      .mockResolvedValueOnce(model([{ functionCall: { name: "getPRDiff", args: PR } }]))
+      .mockResolvedValueOnce(model([{ text: "kelihatannya aman" }, { functionCall: { name: "mergePullRequest", args: PR } }]))
+      .mockResolvedValueOnce(model([{ text: "reviewer menemukan data race, aku ga merge dulu" }]));
+    const data = await executeRemoteJob(job, platform);
+    expect(data.approval).toBeUndefined();
+    const blocked = fetchGeminiGenerate.mock.calls[2][2].at(-1).parts[0].functionResponse.response.content.error;
+    expect(blocked).toMatch(/DIBLOKIR reviewer independen \(gemini\/m\): data race di tasksHandler/);
+    expect(data.trace.find((e) => e.kind === "review")).toMatchObject({ ok: false });
+  });
+
+  it("approve dari reviewer ikut ditampilkan di tombol izin", async () => {
+    fetch.mockImplementation(async (u) => String(u).includes("generativelanguage")
+      ? geminiJSON({ verdict: "approve", reasons: [] }) : new Response("{}"));
+    fetchGeminiGenerate
+      .mockResolvedValueOnce(model([{ functionCall: { name: "getPRDiff", args: PR } }]))
+      .mockResolvedValueOnce(model([{ text: "aman" }, { functionCall: { name: "mergePullRequest", args: PR } }]));
+    const data = await executeRemoteJob(job, platform);
+    expect(data.approval.reason).toContain("reviewer independen (gemini/m): ✅ approve");
+  });
+
+  it("reviewer tidak melihat persona/tools — hanya diff", async () => {
+    fetch.mockResolvedValueOnce(geminiJSON({ verdict: "approve" }));
+    await independentReview({ GEMINI_API_KEYS: "k", GEMINI_MODELS: "m", GEMINI_SYSTEM_PERSONA: "kamu cocoa" }, { diff: "+x", title: "o/r#1" });
+    const body = JSON.parse(fetch.mock.calls[0][1].body);
+    expect(body.tools).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain("kamu cocoa");
+    expect(body.contents[0].parts[0].text).toContain("+x");
+  });
+
+  it("parseVerdict & findPRDiff", () => {
+    expect(parseVerdict('ok ```json\n{"verdict":"approve","reasons":[]}\n```')).toEqual({ verdict: "approve", reasons: [] });
+    expect(parseVerdict("bukan json")).toBeNull();
+    expect(parseVerdict('{"verdict":"maybe"}')).toBeNull();
+    const contents = [
+      { role: "model", parts: [{ functionCall: { name: "getPRDiff", args: { pull_number: 3 } } }] },
+      { role: "function", parts: [{ functionResponse: { name: "getPRDiff", response: { content: "diff-3" } } }] },
+      { role: "model", parts: [{ functionCall: { name: "getPRDiff", args: { pull_number: 4 } } }] },
+      { role: "function", parts: [{ functionResponse: { name: "getPRDiff", response: { content: "diff-4" } } }] },
+    ];
+    expect(findPRDiff(contents, { pull_number: 4 })).toBe("diff-4");
+    expect(findPRDiff(contents, { pull_number: 9 })).toBeNull();
+  });
+});
+
+describe("cek CI sebelum merge", () => {
+  const env = {};
+  const gh = (pr, runs = [], status = { total_count: 0 }) => async (_e, ep) => {
+    if (ep.endsWith("/check-runs?per_page=100")) return { check_runs: runs };
+    if (ep.endsWith("/status")) return status;
+    return pr;
+  };
+  const open = { state: "open", mergeable: true, head: { sha: "abc" } };
+
+  it("CI hijau / tanpa CI -> boleh", async () => {
+    callGitHubAPI.mockImplementation(gh(open, [{ name: "test", status: "completed", conclusion: "success" }]));
+    await expect(assertPullRequestMergeable(env, "o", "r", 4)).resolves.toBeUndefined();
+    callGitHubAPI.mockImplementation(gh(open));
+    await expect(assertPullRequestMergeable(env, "o", "r", 4)).resolves.toBeUndefined();
+  });
+
+  it("CI gagal / masih jalan / konflik / sudah merged -> ditolak dengan alasan", async () => {
+    callGitHubAPI.mockImplementation(gh(open, [{ name: "go test", status: "completed", conclusion: "failure" }]));
+    await expect(assertPullRequestMergeable(env, "o", "r", 4)).rejects.toThrow("CI gagal (go test)");
+    callGitHubAPI.mockImplementation(gh(open, [{ name: "build", status: "in_progress" }]));
+    await expect(assertPullRequestMergeable(env, "o", "r", 4)).rejects.toThrow("CI masih berjalan (build)");
+    callGitHubAPI.mockImplementation(gh({ ...open, mergeable: false, mergeable_state: "dirty" }));
+    await expect(assertPullRequestMergeable(env, "o", "r", 4)).rejects.toThrow("konflik / dirty");
+    callGitHubAPI.mockImplementation(gh({ ...open, merged: true }));
+    await expect(assertPullRequestMergeable(env, "o", "r", 4)).rejects.toThrow("sudah di-merge");
   });
 });
