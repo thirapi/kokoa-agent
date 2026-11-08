@@ -1,7 +1,7 @@
 import { MAX_HISTORY, MAX_AGENT_ITERATIONS, EXECUTION_TIMEOUT, AGENT_ITERATION_TIMEOUT } from "../config.js";
 import { fetchGeminiGenerate } from "../services/gemini.js";
 import { fetchGroqGenerate } from "../services/groq.js";
-import { fetchOpenRouterGenerate } from "../services/openrouter.js";
+import { fetchOpenRouterGenerate, fetchCerebrasGenerate, fetchWorkersAIGenerate, WORKERS_AI_BINDING_KEY } from "../services/openai-compat.js";
 import { prepareMediaPart } from "../services/media.js";
 import {
   sendTelegramAction,
@@ -88,9 +88,40 @@ export async function buildProviderConfigs(env) {
     });
   }
 
+  if (env.CEREBRAS_API_KEY) {
+    const key = env.CEREBRAS_API_KEY.split(",")[0].trim();
+    const models = await getValidModelsForProvider(
+      "cerebras", key,
+      env.CEREBRAS_MODELS || "gpt-oss-120b,qwen-3-235b-a22b-instruct-2507,llama-3.3-70b",
+      env
+    );
+    configs.push({
+      name: "cerebras",
+      keys: env.CEREBRAS_API_KEY.split(",").map((k) => k.trim()),
+      models,
+      callAI: fetchCerebrasGenerate,
+    });
+  }
+
+  // Workers AI: di Worker lewat binding (gratis 10rb neuron/hari, tanpa key).
+  // Di Spaces/Vercel hanya bila CF_ACCOUNT_ID + CF_AI_TOKEN diset (REST).
+  const workersAIKey = env.AI?.run ? WORKERS_AI_BINDING_KEY
+    : (env.CF_ACCOUNT_ID && env.CF_AI_TOKEN ? env.CF_AI_TOKEN : null);
+  if (workersAIKey) {
+    configs.push({
+      name: "workersai",
+      keys: [workersAIKey],
+      models: (env.WORKERS_AI_MODELS || "@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/qwen/qwen3-30b-a3b-fp8")
+        .split(",").map((m) => m.trim()).filter(Boolean),
+      callAI: fetchWorkersAIGenerate,
+    });
+  }
+
+  // Provider yang aktif tapi tidak disebut di AI_PROVIDERS ditaruh paling belakang.
   const priority = (env.AI_PROVIDERS || "gemini,groq")
     .split(",").map((s) => s.trim());
-  configs.sort((a, b) => priority.indexOf(a.name) - priority.indexOf(b.name));
+  const rank = (name) => { const i = priority.indexOf(name); return i === -1 ? priority.length : i; };
+  configs.sort((a, b) => rank(a.name) - rank(b.name));
 
   return configs;
 }

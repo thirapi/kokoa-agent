@@ -22,6 +22,18 @@ workflow deploy menyebarkannya otomatis ke Cloudflare Worker & HF Space:
 gh secret set RUNNER_SECRET --body "$(openssl rand -hex 32)"
 ```
 
+## Provider AI
+
+Urutan dicoba sesuai `AI_PROVIDERS` (`wrangler.jsonc`); provider tanpa key dilewati.
+
+| Provider | Cara aktifkan |
+|---|---|
+| Gemini | `GEMINI_API_KEYS` |
+| Cerebras (~1 juta token/hari gratis) | `npx wrangler secret put CEREBRAS_API_KEY` (+ HF secret yang sama) |
+| OpenRouter (model `:free`) | `OPENROUTER_API_KEY` |
+| Groq | `GROQ_API_KEY` + `GROQ_ENABLED=true` |
+| Cloudflare Workers AI (10rb neuron/hari) | otomatis di Worker (binding `AI`); di Spaces butuh `CF_ACCOUNT_ID` + `CF_AI_TOKEN` |
+
 Opsional tapi disarankan, verifikasi webhook Telegram:
 
 ```bash

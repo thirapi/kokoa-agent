@@ -40,3 +40,21 @@ tidak cocok dengan pola itu. Cloudflare Worker tetap jadi pintu Telegram.
 
 Referensi: HuggingMes (Hermes Agent di HF) memakai pola yang sama — webhook masuk ke
 Space, keluar ke Telegram/Google lewat Cloudflare Worker proxy + Worker cron keepalive.
+
+## Pembanding: Vercel (2026-11-08)
+
+Probe yang sama dijalankan dari Vercel Function (region `iad1`, deploy sementara), 2 run:
+
+| Tujuan | HF Spaces | Vercel |
+|---|---|---|
+| Gemini / Groq / OpenRouter / Cerebras / GitHub | 5/5 | 5/5 (12–90 ms) |
+| api.telegram.org | 0/5 | **5/5** (~260 ms) |
+| tg-bot.thirapi.workers.dev | 0–1/5 | **5/5** (~60 ms) |
+| thirapi-tg-bot-cocoa.hf.space | — | 5/5 |
+| Request ditahan 55 detik | — | ✅ 55.000 ms |
+
+Catatan: deploy sementara/anonim dibatasi `maxDuration` ≤ 60 detik. Dokumentasi Vercel menyebut
+Hobby + Fluid compute sampai 300 detik — perlu dicek ulang di akun Hobby sungguhan.
+
+Kesimpulan: Vercel tidak punya masalah egress HF sama sekali; kandidat kuat untuk menjalankan
+agent loop (tanpa shell/git — itu tetap di GitHub Actions).

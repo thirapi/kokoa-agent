@@ -41,6 +41,19 @@ export async function fetchLiveGeminiModels(apiKey) {
   }
 }
 
+export async function fetchLiveCerebrasModels(apiKey) {
+  try {
+    const res = await fetch("https://api.cerebras.ai/v1/models", {
+      headers: { "Authorization": `Bearer ${apiKey}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data.data || []).map((m) => m.id).filter(Boolean);
+  } catch (_) {
+    return null;
+  }
+}
+
 export async function getValidModelsForProvider(providerName, apiKey, defaultModelsStr, env) {
   const fallbackModels = defaultModelsStr.split(",").map((m) => m.trim()).filter(Boolean);
   if (!apiKey || !env?.CHAT_HISTORY) return fallbackModels;
@@ -58,13 +71,15 @@ export async function getValidModelsForProvider(providerName, apiKey, defaultMod
     liveModels = await fetchLiveOpenRouterModels(apiKey);
   } else if (providerName === "gemini") {
     liveModels = await fetchLiveGeminiModels(apiKey);
+  } else if (providerName === "cerebras") {
+    liveModels = await fetchLiveCerebrasModels(apiKey);
   }
 
   if (liveModels && liveModels.length > 0) {
     // Gemini: saring daftar konfigurasi dengan yang benar-benar hidup.
     // Model pensiun (mis. gemini-2.5-flash) otomatis terbuang tanpa perlu
     // update kode. Kalau irisannya kosong, pakai fallback (rotasi 404 yang urus).
-    if (providerName === "gemini") {
+    if (providerName === "gemini" || providerName === "cerebras") {
       const alive = fallbackModels.filter((m) => liveModels.includes(m));
       if (alive.length > 0) {
         try {
