@@ -99,4 +99,27 @@ describe("processMessage routing", () => {
     expect(processViaSpaces).not.toHaveBeenCalled();
     expect(sentTexts().some((t) => /kelamaan/.test(t))).toBe(true);
   });
+
+  it("kasus nyata: 'haii' setelah tugas repo dijawab Worker", async () => {
+    db.getHistory.mockResolvedValueOnce([
+      { role: "user", parts: [{ text: "cek struktur repo thirapi/kokoa-agent" }] },
+      { role: "model", parts: [{ text: "ok" }] },
+    ]);
+    fetchGeminiGenerate.mockResolvedValueOnce(text("haii jugaa"));
+    await processMessage(msg("haii"), env);
+    expect(processViaSpaces).not.toHaveBeenCalled();
+    expect(sentTexts().some((t) => t.includes("haii jugaa"))).toBe(true);
+  });
+
+  it("prompt disimpan saat dikirim ke Spaces (untuk retry di Worker)", async () => {
+    await processMessage(msg("tolong cek bug di repo thirapi/kokoa-agent"), env);
+    expect(await env.CHAT_HISTORY.get("spaces_prompt:5")).toBe("tolong cek bug di repo thirapi/kokoa-agent");
+  });
+
+  it("forceRuntime=worker: tugas repo dikerjakan Worker & timeout tidak dipantulkan ke Spaces", async () => {
+    fetchGeminiGenerate.mockImplementation(() => slow(call("webSearch", { query: "x" })));
+    await processMessage(msg("tolong cek bug di repo thirapi/kokoa-agent"), env, { forceRuntime: "worker" });
+    expect(processViaSpaces).not.toHaveBeenCalled();
+    expect(sentTexts().some((t) => /kelamaan/.test(t))).toBe(true);
+  });
 });

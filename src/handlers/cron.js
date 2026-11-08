@@ -66,7 +66,17 @@ async function pollSpacesResults(env, ctx) {
           continue;
         }
 
-        await handleSpacesResult(env, chatId, data, data.progressMsgId);
+        // Prompt asli disimpan saat dikirim ke Spaces; kalau ada, kegagalan jaringan
+        // dikerjakan ulang di Worker alih-alih langsung mengirim pesan error.
+        const retryPrompt = await env.CHAT_HISTORY.get(`spaces_prompt:${chatId}`);
+        const { retryable } = await handleSpacesResult(env, chatId, data, data.progressMsgId, { fallbackOnRetryable: !!retryPrompt })
+          || {};
+        if (retryable) {
+          await env.CHAT_HISTORY.delete(`spaces_prompt:${chatId}`).catch(() => {});
+          const { processMessage } = await import("./message.js");
+          // Lock chat masih dipegang (tidak dilepas handleSpacesResult); processMessage melepasnya.
+          await processMessage({ chat: { id: chatId }, text: retryPrompt }, env, { forceRuntime: "worker" });
+        }
       } catch (e) {
         console.error(`[Cron] Failed to poll Spaces result for chat ${chatId}:`, e.message);
       }

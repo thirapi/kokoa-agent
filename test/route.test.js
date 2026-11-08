@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { chooseRuntime, shouldRetryOnSpaces } from "../src/agent/route.js";
+import { chooseRuntime, shouldRetryOnSpaces, isSmallTalk, isRetryableSpacesError } from "../src/agent/route.js";
 import { hasRepoSignal, detectScope } from "../src/agent/scope.js";
 
 const route = (userPrompt, historyTexts = [], hasSpaces = true) =>
@@ -65,4 +65,37 @@ describe("scope helpers", () => {
     expect(detectScope("kok masih gak bisa sih", ["fix bug repo"])).toBe("continue");
     expect(detectScope("ceritain sejarah kota hiroshima dong")).toBe("general");
   });
+});
+
+describe("sapaan tidak pernah dikirim ke Spaces", () => {
+  const repoHistory = ["tolong cek struktur repo thirapi/kokoa-agent"];
+
+  it("kasus nyata: 'haii' setelah tugas repo -> Worker", () => {
+    expect(route("haii", repoHistory)).toBe("worker");
+  });
+
+  it.each(["hai", "haii!", "halo", "hallo cocoa", "pagi", "makasih ya", "thanks", "wkwkwk", "selamat malam"])(
+    "%s -> Worker", (t) => expect(route(t, repoHistory)).toBe("worker"));
+
+  it("lanjutan tugas tetap ke Spaces", () => {
+    expect(route("oke lanjut", repoHistory)).toBe("spaces");
+    expect(route("coba lagi", repoHistory)).toBe("spaces");
+  });
+
+  it("isSmallTalk tidak salah tangkap kalimat tugas", () => {
+    expect(isSmallTalk("halo tolong cek bug di repo thirapi/x sekarang ya")).toBe(false);
+    expect(isSmallTalk("hiroshima itu di mana")).toBe(false);
+  });
+});
+
+describe("isRetryableSpacesError", () => {
+  it.each([
+    "GEMINI_RETRY_TRIGGER: Request Timeout",
+    "fetch failed",
+    "Client network socket disconnected before secure TLS connection was established",
+    "GEMINI_RETRY_TRIGGER: 503 - This model is currently experiencing high demand",
+  ])("retryable: %s", (m) => expect(isRetryableSpacesError(m)).toBe(true));
+
+  it.each(["GEMINI_KEY_INVALID: 400", "gak ada provider AI yang aktif", "Tool tidak terdaftar"])(
+    "bukan retryable: %s", (m) => expect(isRetryableSpacesError(m)).toBe(false));
 });

@@ -77,9 +77,18 @@ describe("pollSpacesResult", () => {
     expect(db.releaseChatLock).toHaveBeenCalledWith(env, "9");
   });
 
-  it("result berisi error -> false (pemanggil boleh fallback)", async () => {
-    fetchMock.mockResolvedValueOnce(json({ status: "ready", error: "socket hang up" })).mockResolvedValue(json({}));
+  it("error jaringan -> false, TANPA pesan error ke user & lock tetap dipegang (Worker lanjut)", async () => {
+    fetchMock.mockResolvedValueOnce(json({ status: "ready", error: "GEMINI_RETRY_TRIGGER: Request Timeout" })).mockResolvedValue(json({}));
     expect(await pollSpacesResult(env, "9", null)).toBe(false);
+    expect(sendTelegramMessage).not.toHaveBeenCalled();
+    expect(db.releaseChatLock).not.toHaveBeenCalled();
+  });
+
+  it("error non-jaringan -> dilaporkan ke user & selesai (tidak di-retry)", async () => {
+    fetchMock.mockResolvedValueOnce(json({ status: "ready", error: "GEMINI_KEY_INVALID: 400" })).mockResolvedValue(json({}));
+    expect(await pollSpacesResult(env, "9", null)).toBe(true);
+    expect(sendTelegramMessage).toHaveBeenCalledWith("000:TEST", "9", expect.stringContaining("GEMINI_KEY_INVALID"));
+    expect(db.releaseChatLock).toHaveBeenCalled();
   });
 });
 
@@ -113,6 +122,30 @@ describe("cron", () => {
     await handleCron({}, env, fakeCtx());
     expect(sendTelegramMessage).toHaveBeenCalledWith("000:TEST", "9", expect.stringContaining("restart"));
     expect(db.releaseChatLock).toHaveBeenCalledWith(env, "9");
+  });
+
+  it("kasus nyata: Spaces timeout ke Gemini -> cron mengerjakan ulang di Worker, bukan kirim error", async () => {
+    const { processMessage } = await import("../src/handlers/message.js");
+    await env.CHAT_HISTORY.put("spaces_prompt:9", "cek struktur repo thirapi/kokoa-agent");
+    db.getPendingSpaces.mockResolvedValueOnce([{ chat_id: "9" }]);
+    fetchMock.mockResolvedValueOnce(json({ status: "ready", error: "GEMINI_RETRY_TRIGGER: Request Timeout", newContent: [] }))
+      .mockResolvedValue(json({}));
+    await handleCron({}, env, fakeCtx());
+    expect(sendTelegramMessage).not.toHaveBeenCalledWith("000:TEST", "9", expect.stringContaining("yah eror"));
+    expect(processMessage).toHaveBeenCalledWith(
+      { chat: { id: "9" }, text: "cek struktur repo thirapi/kokoa-agent" }, env, { forceRuntime: "worker" });
+    expect(db.releaseChatLock).not.toHaveBeenCalled();
+    expect(await env.CHAT_HISTORY.get("spaces_prompt:9")).toBeNull();
+  });
+
+  it("tanpa prompt tersimpan (mis. pesan bermedia) -> error tetap dilaporkan", async () => {
+    const { processMessage } = await import("../src/handlers/message.js");
+    db.getPendingSpaces.mockResolvedValueOnce([{ chat_id: "9" }]);
+    fetchMock.mockResolvedValueOnce(json({ status: "ready", error: "fetch failed" })).mockResolvedValue(json({}));
+    await handleCron({}, env, fakeCtx());
+    expect(processMessage).not.toHaveBeenCalled();
+    expect(sendTelegramMessage).toHaveBeenCalledWith("000:TEST", "9", expect.stringContaining("fetch failed"));
+    expect(db.releaseChatLock).toHaveBeenCalled();
   });
 
   it("mengirim reminder yang jatuh tempo & menjadwalkan ulang yang berulang", async () => {

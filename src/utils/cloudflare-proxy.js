@@ -123,9 +123,19 @@ if (typeof globalThis.fetch === 'function') {
         delete newInit.agent;
         delete newInit.dispatcher;
 
-        return originalFetch(proxyUrl, newInit);
+        try {
+          return await originalFetch(proxyUrl, newInit);
+        } catch (e) {
+          // Jalur Space -> Worker putus (TLS reset NAT HF). Jangan menyerah: coba langsung
+          // ke host AI. Kalau request memang dibatalkan (timeout pemanggil), lempar saja.
+          if (init?.signal?.aborted) throw e;
+          console.warn(`[cloudflare-proxy] proxy gagal (${e.message}), coba langsung ke ${u.hostname}`);
+          return originalFetch(input, init);
+        }
       }
-    } catch (_) {}
+    } catch (e) {
+      if (init?.signal?.aborted) throw e;
+    }
 
     return originalFetch(input, init);
   };

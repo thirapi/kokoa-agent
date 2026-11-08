@@ -651,7 +651,7 @@ async function autoEscalate(env, chatId, currentContents, iteration, functionCal
   return { contextId, repo, instruction };
 }
 
-export async function processMessage(message, env) {
+export async function processMessage(message, env, options = {}) {
   const chatId = String(message.chat.id);
   let isProcessing = true;
   let shouldReleaseLock = true;
@@ -728,6 +728,13 @@ export async function processMessage(message, env) {
           await env.CHAT_HISTORY.put(`progress_msg:${chatId}`, progressMsgId, { expirationTtl: 600 });
         }
 
+        // Simpan prompt (teks saja) agar cron bisa mengerjakan ulang di Worker bila Spaces
+        // gagal karena jaringan. Pesan bermedia tidak di-retry (media tidak disimpan).
+        if (!mediaData) {
+          await env.CHAT_HISTORY.put(`spaces_prompt:${chatId}`, userPrompt, { expirationTtl: 3600 }).catch(() => {});
+        } else {
+          await env.CHAT_HISTORY.delete(`spaces_prompt:${chatId}`).catch(() => {});
+        }
         const { processViaSpaces } = await import("../services/hf-spaces.js");
         const res = await processViaSpaces(env, chatId, userPrompt, mediaData, history, progressMsgId);
         console.log(`[MsgLock] Spaces returned status=${res?.status} for chat ${chatId}`);
@@ -779,7 +786,8 @@ export async function processMessage(message, env) {
     };
 
     const hasSpaces = !!env.HF_SPACES_URL;
-    const runtime = chooseRuntime({ hasSpaces, userPrompt, historyTexts: recentUserTexts(history, 3) });
+    const runtime = options.forceRuntime
+      || chooseRuntime({ hasSpaces, userPrompt, historyTexts: recentUserTexts(history, 3) });
     console.log(`[Route] chat ${chatId} -> ${runtime}`);
     if (runtime === 'spaces' && (await runOnSpaces()) === 'done') return;
 
@@ -804,7 +812,8 @@ export async function processMessage(message, env) {
       );
     } catch (err) {
       // Worker kehabisan waktu & belum ada efek samping -> ulangi di Spaces (budget 240 detik).
-      if (runtime === 'worker' && shouldRetryOnSpaces(err, hasSpaces)) {
+      // forceRuntime = ini SUDAH fallback dari Spaces; jangan pantulkan balik ke sana.
+      if (runtime === 'worker' && !options.forceRuntime && shouldRetryOnSpaces(err, hasSpaces)) {
         console.warn(`[Route] Worker timeout untuk chat ${chatId}, dialihkan ke Spaces`);
         if ((await runOnSpaces()) === 'done') return;
       }

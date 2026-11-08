@@ -2,8 +2,14 @@
 import { runnerAuthHeaders } from "../utils/auth.js";
 import { cleanContentsForHistory } from "../utils/history.js";
 import { MAX_HISTORY } from "../config.js";
+import { isRetryableSpacesError } from "../agent/route.js";
 
-export async function handleSpacesResult(env, chatId, data, progressMsgId) {
+// opts.fallbackOnRetryable: pemanggil akan mengerjakan ulang di Worker bila Spaces gagal
+// karena jaringan/provider. Dalam kasus itu: jangan kirim pesan error, jangan lepas lock,
+// jangan proses antrean — pemanggil yang melanjutkan. Return { retryable }.
+export async function handleSpacesResult(env, chatId, data, progressMsgId, opts = {}) {
+  const retryable = !!opts.fallbackOnRetryable && !data.finalText && !data.proxySent
+    && !data.escalationTriggered && !!data.error && isRetryableSpacesError(data.error);
   const { addHistory, trimHistory, removePendingSpace, releaseChatLock } = await import("../db/index.js");
   const { sendTelegramMessage, deleteTelegramMessage, sendTelegramPhoto, sendTelegramAudio } = await import("../services/telegram.js");
   const { markdownToRichHtml } = await import("../utils/formatter.js");
@@ -38,8 +44,9 @@ export async function handleSpacesResult(env, chatId, data, progressMsgId) {
     }
   } catch (e) { console.error(`[SpacesResult] Queued media block FAIL:`, e.message); }
 
-  // Skip sending if proxy already sent the message
-  if (!data.proxySent) {
+  if (retryable) {
+    console.warn(`[SpacesResult] Spaces gagal (${String(data.error).slice(0, 80)}), dikerjakan ulang di Worker untuk ${chatId}`);
+  } else if (!data.proxySent) {
     try {
       if (data.escalationTriggered) {
         await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, chatId,
@@ -80,6 +87,7 @@ export async function handleSpacesResult(env, chatId, data, progressMsgId) {
     console.log(`[SpacesResult] Step4: deleteProgress done for ${chatId}`);
   } catch (e) { console.error(`[SpacesResult] Step4 FAIL (deleteProgress):`, e.message); }
 
+  if (!retryable) {
   try {
     await releaseChatLock(env, chatId);
     console.log(`[SpacesResult] Step5: releaseChatLock done for ${chatId}`);
@@ -110,6 +118,8 @@ export async function handleSpacesResult(env, chatId, data, progressMsgId) {
     console.error(`[SpacesResult] Dequeue pending message failed for chat ${chatId}:`, e);
   }
 
+  }
+
   try {
     await fetch(`${env.HF_SPACES_URL}/api/result?chatId=${encodeURIComponent(chatId)}`, {
       method: 'DELETE',
@@ -121,6 +131,7 @@ export async function handleSpacesResult(env, chatId, data, progressMsgId) {
   await env.CHAT_HISTORY.put(`callback_done:${chatId}`, "1", { expirationTtl: 300 }).catch(() => {});
   await env.CHAT_HISTORY.delete(`hdl:${chatId}`).catch(() => {});
   console.log(`[SpacesResult] Completed for chat ${chatId}`);
+  return { retryable };
 }
 
 export async function pollSpacesResult(env, chatId, progressMsgId) {
@@ -158,13 +169,10 @@ export async function pollSpacesResult(env, chatId, progressMsgId) {
 
       await env.CHAT_HISTORY.put(mutexKey, "1", { expirationTtl: 120 });
 
-      await handleSpacesResult(env, chatId, data, progressMsgId);
-      // Kalau result ternyata berisi error (mis. Client network socket disconnected),
-      // kembalikan false agar message.js tahu Spaces gagal dan bisa fallback ke Worker.
-      if (data.error) {
-        console.warn(`[ShortPoll] Spaces returned error: ${data.error}`);
-        return false;
-      }
+      const { retryable } = await handleSpacesResult(env, chatId, data, progressMsgId, { fallbackOnRetryable: true });
+      // Gagal karena jaringan/provider -> false: message.js mengerjakan ulang di Worker.
+      // Error lain sudah dilaporkan ke user oleh handleSpacesResult -> selesai.
+      if (retryable) return false;
       return true;
     } catch (e) {
       console.error(`[ShortPoll] Attempt ${attempt} failed for ${chatId}:`, e.message);
