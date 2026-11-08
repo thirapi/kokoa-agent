@@ -48,7 +48,7 @@ meneruskannya ke Vercel/Spaces per job.
 ```bash
 gh secret set MP3_CONVERTER_URL --body "https://mp3.domainmu.id"
 sed -n 's/^MP3_CONVERTER_SECRET=//p' ~/.config/yt-mp3/env | gh secret set MP3_CONVERTER_SECRET
-# lalu push ke main (deploy.yml jalan saat push)
+gh workflow run deploy.yml   # deploy ulang agar secret tersalin ke Worker
 ```
 
 ## Uji manual
